@@ -36,6 +36,11 @@ const schema = z.object({
    * (spec §4b). Off by default so a deploy can ship 2FA, let staff enrol, then turn it on.
    */
   STAFF_2FA_REQUIRED: z.stringbool().default(false),
+  /**
+   * Per-service pages to visit before an account is deleted (spec §4c), shown on the deletion
+   * page: "url|label,url|label". Labels must not contain commas or "|".
+   */
+  DELETION_LINKS: z.string().default("http://localhost:5174/account#deletion|Choose what happens to your Rigs profiles"),
   /** Where re-encoded avatars are cached (spec §6a). */
   AVATAR_CACHE_DIR: z.string().default(".cache/avatars"),
   SMTP_URL: z.string().optional(),
@@ -57,5 +62,9 @@ export const env = {
   trustedProxies: list(parsed.TRUSTED_PROXIES),
   firstPartyAudiences: list(parsed.FIRST_PARTY_AUDIENCES),
   resources: list(parsed.RESOURCES),
+  deletionLinks: list(parsed.DELETION_LINKS).map((l) => {
+    const [url, label] = l.split("|", 2) as [string, string | undefined];
+    return { url, label: label?.trim() || url };
+  }).filter((l) => /^https?:\/\//.test(l.url)),
 };
 export type Env = typeof env;

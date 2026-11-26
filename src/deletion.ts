@@ -70,7 +70,10 @@ export async function scheduleDeletion(sub: string): Promise<Date> {
     r.email,
     `openRMS: ${r.callsign} will be deleted on ${r.delete_after.toUTCString()}`,
     `You asked to delete your openRMS account ${r.callsign}. It will be deleted on ${r.delete_after.toUTCString()}, with everything openRMS services hold for it.\n\n` +
-      `Changed your mind? Cancel here: ${env.UI_URL}/delete/cancel?token=${token}\n(or sign in and cancel on your account page).`,
+      `Changed your mind? Cancel here: ${env.UI_URL}/delete/cancel?token=${token}\n(or sign in and cancel on your account page).` +
+      (env.deletionLinks.length
+        ? `\n\nBefore then you can decide what other openRMS services do with what you shared there:\n${env.deletionLinks.map((l) => `- ${l.label}: ${l.url}`).join("\n")}`
+        : ""),
   ).catch((e) => console.error("[deletion] mail failed", (e as Error).message));
   return r.delete_after;
 }

@@ -26,7 +26,7 @@ export interface PublicProfile {
   sub: string; callsign: string; callsign_verified: boolean; name?: string; grid?: string; city?: string; bio?: string; links?: ProfileLink[];
   picture?: string; self?: boolean; visibility?: Record<ProfileField, Level>; hidden?: boolean;
 }
-export interface UiConfig { issuer: string; apps: { origin: string; name: string }[]; rigsCatalog?: string | null }
+export interface UiConfig { issuer: string; apps: { origin: string; name: string }[]; rigsCatalog?: string | null; deletionLinks?: { url: string; label: string }[] }
 export interface Radio { id: string; model: string; hamlib_model: number | null; label: string; primary: boolean }
 
 async function send<T>(path: string, init: RequestInit = {}): Promise<T> {

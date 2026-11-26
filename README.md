@@ -71,6 +71,8 @@ environment: `BETTER_AUTH_URL` (the issuer), `TRUSTED_ORIGINS`, `APPS`, `FIRST_P
 - `AVATAR_CACHE_DIR` (default `.cache/avatars`): where re-encoded avatars are cached. Must be
   writable. Avatars are fetched by Accounts (Gravatar or a user's https URL; never internal
   addresses), checked by magic bytes and re-encoded to WebP with sharp.
+- `DELETION_LINKS`: per-service pages shown on the deletion page, `url|label,url|label`
+  (production: `https://rigs.openrms.dev/account#deletion|Choose what happens to your Rigs profiles`).
 - `STAFF_2FA_REQUIRED` (default `false`): staff (moderator and up) need TOTP or a passkey, or
   they act as `user` everywhere (spec §4b). Deploy with it off, have every staff account enrol
   under Account → Sign-in security, then turn it on.

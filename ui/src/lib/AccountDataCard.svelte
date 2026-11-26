@@ -2,7 +2,7 @@
   // Your data (openRMS-Spec/accounts/identity.md §4c): download it, or delete the account after
   // a grace period.
   import { goto } from "$app/navigation";
-  import { api } from "#lib/api.ts";
+  import { api, uiConfig } from "#lib/api.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
@@ -12,8 +12,11 @@
   let info = $state<{ pending: string | null; graceDays: number; soleOwnerOf: string[]; fresh: boolean; superadmin: boolean } | null>(null);
   let open = $state(false), password = $state(""), confirm = $state(""), err = $state(""), busy = $state(false);
   const load = async () => (info = await api.deletion().catch(() => null));
+  // Other services' own choices for your data there (e.g. what happens to Rigs profiles).
+  let links = $state<{ url: string; label: string }[]>([]);
   $effect(() => {
     load();
+    uiConfig().then((c) => (links = c.deletionLinks ?? []));
   });
 
   async function remove(e: Event) {
@@ -36,6 +39,17 @@
   }
 </script>
 
+{#snippet serviceLinks()}
+  {#if links.length}
+    <div class="grid gap-1 text-sm">
+      <span class="text-muted-foreground">Before it goes, you can decide what other openRMS services do with what you've shared there:</span>
+      <ul class="m-0 pl-5">
+        {#each links as l (l.url)}<li><a href={l.url} target="_blank" rel="noopener">{l.label}</a></li>{/each}
+      </ul>
+    </div>
+  {/if}
+{/snippet}
+
 <Card.Root class="mb-5" id="data">
   <Card.Header>
     <Card.Title><h2 class="m-0">Your data</h2></Card.Title>
@@ -49,6 +63,7 @@
         <span>Your account will be deleted on <b>{new Date(info.pending).toLocaleString()}</b>.</span>
         <Button onclick={cancel}>Keep my account</Button>
       </div>
+      {@render serviceLinks()}
     {:else if info}
       <section class="grid gap-3">
         <h3 class="m-0">Delete my account</h3>
@@ -61,6 +76,7 @@
             Your account, callsign and everything above go after {info.graceDays} days, and every openRMS service is told to delete what it holds.
             Until then you can change your mind.
           </p>
+          {@render serviceLinks()}
           <div><Button variant="destructive" onclick={() => (open = true)}>Delete my account…</Button></div>
         {:else if !info.fresh}
           <p class="m-0 text-sm">For your safety, <a href="/login?next=%2Faccount%23data">sign in again</a> first (it's been more than 15 minutes).</p>
