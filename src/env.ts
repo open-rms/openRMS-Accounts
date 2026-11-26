@@ -22,6 +22,14 @@ const schema = z.object({
   FIRST_PARTY_AUDIENCES: z.string().default("http://localhost:8787,http://localhost:8790"),
   /** Comma-separated resource servers (audiences) OAuth clients may request (RFC 8707). */
   RESOURCES: z.string().default("http://localhost:8787,http://localhost:8790"),
+  /**
+   * Headers that carry the real client IP (rate limits, session records), in order, e.g.
+   * "cf-connecting-ip" behind Cloudflare. Any client can send these, so list a header only if
+   * Accounts is reachable solely through a proxy that sets it. Empty: Better Auth's default.
+   */
+  TRUSTED_IP_HEADERS: z.string().default(""),
+  /** Proxy IPs or CIDRs to skip when a header holds a forwarded chain (Better Auth trustedProxies). */
+  TRUSTED_PROXIES: z.string().default(""),
   REQUIRE_EMAIL_VERIFICATION: z.stringbool().default(false),
   SMTP_URL: z.string().optional(),
   MAIL_FROM: z.string().default("openRMS Accounts <noreply@localhost>"),
@@ -38,6 +46,8 @@ export const env = {
   /** Trusted first-party apps a sign-in may return to. */
   apps: trustedOrigins.map((origin) => ({ origin, name: names.get(origin) ?? origin })),
   trustedOrigins,
+  ipHeaders: list(parsed.TRUSTED_IP_HEADERS).map((h) => h.toLowerCase()),
+  trustedProxies: list(parsed.TRUSTED_PROXIES),
   firstPartyAudiences: list(parsed.FIRST_PARTY_AUDIENCES),
   resources: list(parsed.RESOURCES),
 };

@@ -61,6 +61,11 @@ environment: `BETTER_AUTH_URL` (the issuer), `TRUSTED_ORIGINS`, `APPS`, `FIRST_P
 
 - `HOST` (default `127.0.0.1`): Accounts listens on loopback; put a reverse proxy or tunnel in
   front for the public URL. Set `0.0.0.0` or `::` only if it must listen on every interface.
+- `TRUSTED_IP_HEADERS` (default empty: Better Auth's own default): the header your proxy sets
+  with the real client IP, for per-IP rate limits, e.g. `cf-connecting-ip` behind Cloudflare
+  Tunnel. Clients can forge these headers, so set it only when Accounts is reachable solely
+  through that proxy (`HOST=127.0.0.1`). `TRUSTED_PROXIES` lists proxy IPs or CIDRs when a
+  header carries a forwarded chain.
 - `SMTP_URL` and `MAIL_FROM`: password-reset and verification mail. Unset, mail is logged.
   Cloudflare Email Sending: `smtps://api_token:<token>@smtp.mx.cloudflare.net:465`.
 

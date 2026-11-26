@@ -112,7 +112,19 @@ export const auth = betterAuth({
   basePath: "/api/auth",
   database: pool,
   trustedOrigins: env.trustedOrigins,
-  advanced: env.COOKIE_DOMAIN ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } } : {},
+  advanced: {
+    ...(env.COOKIE_DOMAIN ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } } : {}),
+    // Behind a tunnel or proxy, the client IP comes from a header that proxy sets (rate limits
+    // are per IP). Unset: Better Auth's default (x-forwarded-for, single value only).
+    ...(env.ipHeaders.length || env.trustedProxies.length
+      ? {
+          ipAddress: {
+            ...(env.ipHeaders.length ? { ipAddressHeaders: env.ipHeaders } : {}),
+            ...(env.trustedProxies.length ? { trustedProxies: env.trustedProxies } : {}),
+          },
+        }
+      : {}),
+  },
   session: { expiresIn: 7 * 24 * 3600, updateAge: 24 * 3600 },
   emailAndPassword: {
     enabled: true,
