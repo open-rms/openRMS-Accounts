@@ -59,7 +59,9 @@ self-hoster runs one login for every app.
 
 Node + PostgreSQL 16+. Own database and role `openrms_accounts` (create with
 `db/bootstrap.sql`); it shares a Postgres instance with other services, but no service reads
-another's database. The openrms.dev deployment uses Neon (umbrella `PLAN.md`, Database); the
+another's database. The openrms.dev deployment runs PostgreSQL in the app container over a
+Unix socket with peer auth (one Linux user per service; umbrella `PLAN.md`, Database), e.g.
+`DATABASE_URL=postgresql://openrms_accounts@/openrms_accounts?host=/var/run/postgresql`; the
 code stays provider-neutral. Dev port **8789**. Env:
 `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `DATABASE_URL`, `COOKIE_DOMAIN` (`.openrms.dev`),
 `TRUSTED_ORIGINS`, SMTP settings.
@@ -84,8 +86,8 @@ Accounts runs our own Better Auth, never a managed auth product. Neon's Managed 
 considered and ruled out: no custom fields, hooks, plugins or server code (Accounts needs the
 callsign field and uniqueness hook, custom claims, device authorization, the club and service
 APIs, webhooks), no documented export to self-hosted, and no documented custom domain for the
-issuer. A hosted **plain Postgres** (Neon or any other) is fine for `DATABASE_URL`: moving back
-is an ordinary dump and restore.
+issuer. Any **plain Postgres** (local, in the app container, or hosted) is fine for
+`DATABASE_URL`: moving between them is an ordinary dump and restore.
 
 ## Phases
 
