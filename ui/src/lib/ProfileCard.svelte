@@ -2,7 +2,7 @@
   // Profile fields and who sees each (openRMS-Spec/accounts/identity.md §4a). Name and grid live
   // on the Better Auth user (updateUser); the rest and every visibility go to /api/v1/me/profile.
   import { authClient } from "#lib/auth.ts";
-  import { api, type Level, type ProfileField, type ProfileLink } from "#lib/api.ts";
+  import { api, type AvatarSource, type Level, type ProfileField, type ProfileLink } from "#lib/api.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
@@ -13,6 +13,7 @@
   let name = $state(""), grid = $state(""), bio = $state(""), city = $state(""), links = $state<ProfileLink[]>([]), hidden = $state(false);
   let vis = $state<Record<ProfileField, Level>>({ name: "members", grid: "private", city: "private", bio: "public", links: "public", avatar: "public" });
   let msg = $state(""), err = $state(""), busy = $state(false), loadedFor = "";
+  let avatarSource = $state<AvatarSource>("none"), avatarUrl = $state(""), avatarPreview = $state<string | null>(null);
 
   $effect(() => {
     if (user && loadedFor !== user.id) {
@@ -25,6 +26,9 @@
         links = p.links;
         vis = p.visibility;
         hidden = p.hidden;
+        avatarSource = p.avatarSource;
+        avatarUrl = p.avatarUrl ?? "";
+        avatarPreview = p.avatarPreview ?? null;
       });
     }
   });
@@ -42,7 +46,11 @@
     try {
       const { error } = await authClient.updateUser({ name, gridsquare: grid.trim() || null } as never);
       if (error) throw new Error(error.message ?? "Save failed");
-      await api.saveProfile({ bio, city, links: links.filter((l) => l.url.trim()), visibility: vis, hidden });
+      await api.saveProfile({
+        bio, city, links: links.filter((l) => l.url.trim()), visibility: vis, hidden,
+        avatar: { source: avatarSource, url: avatarSource === "url" ? avatarUrl.trim() : null },
+      });
+      avatarPreview = (await api.myProfile()).avatarPreview ?? null;
       msg = "Saved. Apps see the change on their next token (within 15 minutes).";
     } catch (x) {
       err = (x as Error).message;
@@ -68,6 +76,25 @@
   </Card.Header>
   <Card.Content>
     <form class="grid max-w-[560px] gap-4" onsubmit={save}>
+      <fieldset class="grid gap-2">
+        <div class="flex items-center justify-between gap-3"><legend class="text-sm font-medium">Picture</legend>{@render who("avatar", "va")}</div>
+        <div class="flex items-start gap-4">
+          {#if avatarPreview && avatarSource !== "none"}
+            <img src={avatarPreview} alt="" width="64" height="64" class="rounded-full border" />
+          {:else}
+            <div class="bg-muted flex h-16 w-16 items-center justify-center rounded-full border font-mono text-xs" aria-hidden="true">{user.callsign}</div>
+          {/if}
+          <div class="grid flex-1 gap-1.5 text-sm">
+            <label class="flex items-center gap-2"><input type="radio" value="none" bind:group={avatarSource} /> None (shows your callsign)</label>
+            <label class="flex items-start gap-2"><input type="radio" class="mt-1" value="gravatar" bind:group={avatarSource} />
+              <span>Gravatar for my email address <span class="text-muted-foreground">(openRMS fetches it for viewers, so Gravatar never sees them, but anyone can check whether a given email has a Gravatar picture)</span></span></label>
+            <label class="flex items-center gap-2"><input type="radio" value="url" bind:group={avatarSource} /> A picture on the web</label>
+            {#if avatarSource === "url"}
+              <Input type="url" placeholder="https://… (PNG, JPEG, WebP or GIF, up to 2 MB)" pattern="https://.*" bind:value={avatarUrl} />
+            {/if}
+          </div>
+        </div>
+      </fieldset>
       <div class="grid gap-1.5">
         <div class="flex items-center justify-between gap-3"><Label for="n">Name</Label>{@render who("name", "vn")}</div>
         <Input id="n" required bind:value={name} />

@@ -8,6 +8,7 @@ import { q } from "../db/pool.js";
 import { env } from "../env.js";
 import { emit } from "../events.js";
 import { normalizeCallsign } from "../lib/callsign.js";
+import { avatarImage, avatarPublicUrl, avatarVersion, checkAvatarUrl, SIZES, type Size } from "../avatar.js";
 import { canSee, DEFAULT_VISIBILITY, FIELDS, gridFor, loadProfile, profileInput, type Viewer } from "../profile.js";
 import { requireSession, type SessionVars } from "./session.js";
 
@@ -17,8 +18,10 @@ export const meProfileRoutes = new Hono<SessionVars>();
 meProfileRoutes.use("*", requireSession);
 
 meProfileRoutes.get("/", async (c) => {
-  const p = await loadProfile(c.get("session").user.id);
-  return c.json({ ...p, defaults: DEFAULT_VISIBILITY, fields: FIELDS });
+  const u = c.get("session").user;
+  const p = await loadProfile(u.id);
+  const preview = p.avatarSource === "none" ? null : avatarPublicUrl(u.id, avatarVersion(p.avatarSource, p.avatarUrl, u.email));
+  return c.json({ ...p, avatarPreview: preview, defaults: DEFAULT_VISIBILITY, fields: FIELDS });
 });
 
 meProfileRoutes.put("/", async (c) => {
@@ -27,6 +30,14 @@ meProfileRoutes.put("/", async (c) => {
   const sub = c.get("session").user.id;
   const cur = await loadProfile(sub);
   const d = parsed.data;
+  // A new picture URL must be fetchable and a real image now, not on first view.
+  if (d.avatar?.source === "url") {
+    if (!d.avatar.url) return c.json({ error: "give the picture's https URL" }, 400);
+    if (d.avatar.url !== cur.avatarUrl || cur.avatarSource !== "url") {
+      const why = await checkAvatarUrl(d.avatar.url);
+      if (why) return c.json({ error: `can't use that picture: ${why}` }, 400);
+    }
+  }
   const clean = (s: string | null | undefined, old: string | null) => (s === undefined ? old : s?.trim() ? s.trim() : null);
   const next = {
     bio: clean(d.bio, cur.bio),
@@ -34,11 +45,13 @@ meProfileRoutes.put("/", async (c) => {
     links: d.links ?? cur.links,
     visibility: { ...cur.visibility, ...(d.visibility ?? {}) },
     hidden: d.hidden ?? cur.hidden,
+    avatarSource: d.avatar?.source ?? cur.avatarSource,
+    avatarUrl: d.avatar ? (d.avatar.source === "url" ? d.avatar.url ?? null : null) : cur.avatarUrl,
   };
   await q(
-    `INSERT INTO profile (sub, bio, city, links, visibility, hidden, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now())
-     ON CONFLICT (sub) DO UPDATE SET bio = $2, city = $3, links = $4, visibility = $5, hidden = $6, updated_at = now()`,
-    [sub, next.bio, next.city, JSON.stringify(next.links), JSON.stringify(next.visibility), next.hidden],
+    `INSERT INTO profile (sub, bio, city, links, visibility, hidden, avatar_source, avatar_url, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+     ON CONFLICT (sub) DO UPDATE SET bio = $2, city = $3, links = $4, visibility = $5, hidden = $6, avatar_source = $7, avatar_url = $8, updated_at = now()`,
+    [sub, next.bio, next.city, JSON.stringify(next.links), JSON.stringify(next.visibility), next.hidden, next.avatarSource, next.avatarUrl],
   );
   // Services cache visibility (spec §6) and must hear about it: bumps the account and notifies.
   await emit("user.updated", { sub });
@@ -84,7 +97,7 @@ function clientIp(c: Context): string {
     return "unknown";
   }
 }
-function limited(ip: string): boolean {
+function limited(ip: string, max = 120): boolean {
   const now = Date.now();
   const h = hits.get(ip);
   if (!h || h.reset < now) {
@@ -92,7 +105,7 @@ function limited(ip: string): boolean {
     if (hits.size > 50_000) for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
     return false;
   }
-  return ++h.n > 120;
+  return ++h.n > max;
 }
 
 /** A first-party access token (no client_id) for any first-party audience means "signed in". */
@@ -111,20 +124,24 @@ async function bearerViewer(header: string | undefined): Promise<string | null> 
   }
 }
 
+async function viewerOf(c: Context, owner: string): Promise<Viewer> {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
+  const viewerSub = session?.user.id ?? (await bearerViewer(c.req.header("authorization")));
+  return viewerSub === owner ? "owner" : viewerSub ? "members" : "public";
+}
+
 profileRoutes.get("/:id", async (c) => {
   if (limited(clientIp(c))) return c.json({ error: "too many requests" }, 429);
   const id = c.req.param("id");
-  const { rows } = await q<{ id: string; name: string; callsign: string; callsignVerified: boolean | null; gridsquare: string | null; banned: boolean | null }>(
-    `SELECT id, name, callsign, "callsignVerified", gridsquare, banned FROM "user" WHERE callsign = $1 OR id = $2 LIMIT 1`,
+  const { rows } = await q<{ id: string; name: string; email: string; callsign: string; callsignVerified: boolean | null; gridsquare: string | null; banned: boolean | null }>(
+    `SELECT id, name, email, callsign, "callsignVerified", gridsquare, banned FROM "user" WHERE callsign = $1 OR id = $2 LIMIT 1`,
     [normalizeCallsign(id), id],
   );
   const u = rows[0];
   const notFound = () => c.json({ error: "not found" }, 404);
   if (!u || u.banned) return notFound();
 
-  const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
-  const viewerSub = session?.user.id ?? (await bearerViewer(c.req.header("authorization")));
-  let viewer: Viewer = viewerSub === u.id ? "owner" : viewerSub ? "members" : "public";
+  let viewer = await viewerOf(c, u.id);
   // The owner may preview how others see the page.
   const as = c.req.query("as");
   if (viewer === "owner" && (as === "public" || as === "members")) viewer = as;
@@ -139,8 +156,43 @@ profileRoutes.get("/:id", async (c) => {
   if (p.city && canSee(v.city, viewer)) out.city = p.city;
   if (p.bio && canSee(v.bio, viewer)) out.bio = p.bio;
   if (p.links.length && canSee(v.links, viewer)) out.links = p.links;
+  if (p.avatarSource !== "none" && canSee(v.avatar, viewer)) out.picture = avatarPublicUrl(u.id, avatarVersion(p.avatarSource, p.avatarUrl, u.email));
   if (viewer === "owner") Object.assign(out, { self: true, visibility: v, hidden: p.hidden });
   c.header("Cache-Control", viewer === "public" ? "public, max-age=60" : "private, no-store");
   c.header("Vary", "Origin, Cookie, Authorization");
   return c.json(out);
+});
+
+// ---------------------------------------------------------------- avatars: /api/v1/avatars/{sub}?s=
+
+export const avatarRoutes = new Hono();
+
+avatarRoutes.get("/:sub", async (c) => {
+  // Lists show many faces at once: a looser limit than profile lookups.
+  if (limited(`avatar:${clientIp(c)}`, 600)) return c.json({ error: "too many requests" }, 429);
+  const size = (SIZES as readonly number[]).includes(Number(c.req.query("s"))) ? (Number(c.req.query("s")) as Size) : 128;
+  const sub = c.req.param("sub");
+  const { rows } = await q<{ email: string; banned: boolean | null }>(`SELECT email, banned FROM "user" WHERE id = $1`, [sub]);
+  const notFound = () => c.body(null, 404, { "cache-control": "public, max-age=300" });
+  if (!rows[0] || rows[0].banned) return notFound();
+  const p = await loadProfile(sub);
+  if (p.avatarSource === "none") return notFound();
+  const publicPic = p.visibility.avatar === "public" && !p.hidden;
+  if (!publicPic) {
+    const viewer = await viewerOf(c, sub);
+    if (viewer === "public" || (viewer === "members" && (p.hidden || p.visibility.avatar === "private"))) return notFound();
+  }
+  const img = await avatarImage(p.avatarSource, p.avatarUrl, rows[0].email, size);
+  if (!img) return notFound();
+  const headers = {
+    "content-type": "image/webp",
+    etag: img.etag,
+    "cache-control": publicPic ? "public, max-age=3600" : "private, max-age=300",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'",
+    "cross-origin-resource-policy": "cross-origin",
+    vary: "Cookie, Authorization",
+  };
+  if (c.req.header("if-none-match") === img.etag) return c.body(null, 304, headers);
+  return c.body(new Uint8Array(img.body), 200, headers);
 });

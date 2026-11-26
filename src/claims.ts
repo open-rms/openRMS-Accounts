@@ -1,7 +1,7 @@
 // The claims Accounts puts in tokens (openRMS-Spec/accounts/identity.md §4).
 import { q } from "./db/pool.js";
 import { effectiveRole } from "./staff.js";
-import { thirdPartyProfile } from "./profile.js";
+import { loadProfile, pictureFor, thirdPartyProfile } from "./profile.js";
 
 export interface UserRow {
   id: string;
@@ -45,7 +45,12 @@ export async function buildClaims(user: Pick<UserRow, "id"> & Partial<UserRow>, 
   const has = (s: string) => scopes.includes(s);
   const out: Record<string, unknown> = {};
   // Third parties get the profile as a signed-in member would see it (spec §4a).
-  if (has("profile")) Object.assign(out, firstParty ? { name: u.name, grid: u.gridsquare ?? null } : await thirdPartyProfile(u.id, u.name, u.gridsquare));
+  if (has("profile")) {
+    if (firstParty) {
+      const picture = pictureFor(u.id, await loadProfile(u.id), u.email);
+      Object.assign(out, { name: u.name, grid: u.gridsquare ?? null }, picture ? { picture } : {});
+    } else Object.assign(out, await thirdPartyProfile(u.id, u.name, u.gridsquare, u.email));
+  }
   if (has("email")) Object.assign(out, { email: u.email, email_verified: !!u.emailVerified });
   if (has("callsign")) {
     Object.assign(out, { callsign: u.callsign, callsign_verified: !!u.callsignVerified, callsign_verified_method: u.callsignVerifiedMethod ?? null });

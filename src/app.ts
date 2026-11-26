@@ -11,7 +11,7 @@ import { env } from "./env.js";
 import { adminRoutes } from "./routes/admin.js";
 import { keyRoutes, meKeyRoutes, userKeyRoutes } from "./routes/keys.js";
 import { meRoutes } from "./routes/me.js";
-import { meProfileRoutes, profileRoutes } from "./routes/profile.js";
+import { avatarRoutes, meProfileRoutes, profileRoutes } from "./routes/profile.js";
 import { serviceRoutes } from "./routes/service.js";
 import { tokenRoutes } from "./routes/token.js";
 
@@ -63,6 +63,7 @@ export function createApp() {
   app.route("/api/v1/me/keys", meKeyRoutes);
   app.route("/api/v1/me/profile", meProfileRoutes);
   app.route("/api/v1/profiles", profileRoutes);
+  app.route("/api/v1/avatars", avatarRoutes);
   app.route("/api/v1/me", meRoutes);
   app.route("/api/v1/keys", keyRoutes);
   app.route("/api/v1", userKeyRoutes);

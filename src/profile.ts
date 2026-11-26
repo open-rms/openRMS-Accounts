@@ -2,6 +2,7 @@
 // members (anyone signed in to openRMS) or private (the owner and staff tools). The callsign is
 // always public. A public grid is cut to 4 characters.
 import { z } from "zod";
+import { avatarPublicUrl, avatarVersion } from "./avatar.js";
 import { q } from "./db/pool.js";
 
 export const FIELDS = ["name", "grid", "city", "bio", "links", "avatar"] as const;
@@ -28,6 +29,10 @@ export const profileInput = z.object({
   links: z.array(linkSchema).max(5).optional(),
   visibility: z.object(Object.fromEntries(FIELDS.map((f) => [f, z.enum(LEVELS).optional()])) as Record<Field, z.ZodOptional<z.ZodEnum<{ public: "public"; members: "members"; private: "private" }>>>).partial().optional(),
   hidden: z.boolean().optional(),
+  avatar: z.object({
+    source: z.enum(["none", "gravatar", "url"]),
+    url: z.string().max(500).url().refine((u) => u.startsWith("https://"), "the picture URL must start with https://").nullable().optional(),
+  }).optional(),
 });
 
 export interface ProfileRow {
@@ -36,11 +41,13 @@ export interface ProfileRow {
   links: { kind: string; url: string }[];
   visibility: Visibility;
   hidden: boolean;
+  avatarSource: "none" | "gravatar" | "url";
+  avatarUrl: string | null;
 }
 
 export async function loadProfile(sub: string): Promise<ProfileRow> {
-  const { rows } = await q<{ bio: string | null; city: string | null; links: unknown; visibility: unknown; hidden: boolean }>(
-    `SELECT bio, city, links, visibility, hidden FROM profile WHERE sub = $1`,
+  const { rows } = await q<{ bio: string | null; city: string | null; links: unknown; visibility: unknown; hidden: boolean; avatar_source: string; avatar_url: string | null }>(
+    `SELECT bio, city, links, visibility, hidden, avatar_source, avatar_url FROM profile WHERE sub = $1`,
     [sub],
   );
   const r = rows[0];
@@ -50,6 +57,8 @@ export async function loadProfile(sub: string): Promise<ProfileRow> {
     links: Array.isArray(r?.links) ? (r!.links as ProfileRow["links"]) : [],
     visibility: { ...DEFAULT_VISIBILITY, ...((r?.visibility ?? {}) as Partial<Visibility>) },
     hidden: !!r?.hidden,
+    avatarSource: (r?.avatar_source ?? "none") as ProfileRow["avatarSource"],
+    avatarUrl: r?.avatar_url ?? null,
   };
 }
 
@@ -63,10 +72,18 @@ export function gridFor(grid: string | null | undefined, level: Level, viewer: V
  * Profile claims for a third-party token (spec §4a): what a signed-in member could see, so a
  * private field is null and a public grid is cut to 4 characters. First-party tokens skip this.
  */
-export async function thirdPartyProfile(sub: string, name: string, grid: string | null) {
+export async function thirdPartyProfile(sub: string, name: string, grid: string | null, email: string) {
   const p = await loadProfile(sub);
+  const picture = pictureFor(sub, p, email);
   return {
     name: canSee(p.visibility.name, "members") ? name : null,
     grid: gridFor(grid, p.visibility.grid, "members"),
+    ...(picture ? { picture } : {}),
   };
+}
+
+/** The `picture` claim: the proxy URL, only when an avatar is set and public (spec §4). */
+export function pictureFor(sub: string, p: ProfileRow, email: string): string | null {
+  if (p.avatarSource === "none" || p.visibility.avatar !== "public") return null;
+  return avatarPublicUrl(sub, avatarVersion(p.avatarSource, p.avatarUrl, email));
 }

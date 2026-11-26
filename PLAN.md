@@ -128,8 +128,16 @@ issuer. Any **plain Postgres** (local, in the app container, or hosted) is fine 
   2026-11-25); Rust crate `openrms-auth` built (device flow; JWKS verification when a Rust
   service needs it), originally planned as: `openrms-auth` in openRMS-Libs (JWKS verify, device
   flow) for Watch and Gateway.
-- **AC3:** passkeys, optional 2FA (required for staff), callsign proof methods, third-party
+- **AC3:** ~~passkeys, optional 2FA (required for staff)~~ (done 2026-11-26, with Accounts-minted
+  API keys, profile visibility and public profiles, and avatars via the proxy); still to do:
+  "My radios", account export and self-service deletion, callsign proof methods, third-party
   client registration (admin approved first; dynamic registration later).
+- **Avatar uploads (later, needs moderation):** today a picture is Gravatar (opt-in) or the
+  user's own https URL, fetched and re-encoded by the proxy. Uploads would go to R2 through a
+  presigned PUT (2 MB, image types only), be re-encoded server-side like proxied pictures, and
+  stay pending (the owner sees the picture, everyone else the monogram) until a moderator
+  approves it. Needs an `avatar:moderate` permission for moderators, a report button on
+  profiles, an audit trail, and removal that also purges the proxy cache.
 - **Later:** trust between issuers of self-hosted stacks (federation).
 
 ## Open questions

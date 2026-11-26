@@ -52,6 +52,11 @@
     <Card.Root>
       <Card.Content class="grid gap-3">
         <div class="flex flex-wrap items-center gap-3">
+          {#if p.picture}
+            <img src={p.picture.replace("s=128", "s=256")} alt="" width="96" height="96" class="rounded-full border" />
+          {:else}
+            <div class="bg-muted flex h-24 w-24 items-center justify-center rounded-full border font-mono text-sm" aria-hidden="true">{p.callsign}</div>
+          {/if}
           <h1 class="m-0 font-mono">{p.callsign}</h1>
           {#if p.callsign_verified}<Badge variant="open">verified callsign</Badge>{/if}
         </div>
@@ -67,7 +72,7 @@
             {/each}
           </ul>
         {/if}
-        {#if !p.name && !p.bio && !p.city && !p.grid && !p.links?.length}
+        {#if !p.name && !p.bio && !p.city && !p.grid && !p.links?.length && !p.picture}
           <p class="text-muted-foreground m-0 text-sm">{p.callsign} hasn't shared anything else{as === "public" || !isOwner ? " publicly" : ""}.</p>
         {/if}
       </Card.Content>

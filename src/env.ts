@@ -36,6 +36,8 @@ const schema = z.object({
    * (spec §4b). Off by default so a deploy can ship 2FA, let staff enrol, then turn it on.
    */
   STAFF_2FA_REQUIRED: z.stringbool().default(false),
+  /** Where re-encoded avatars are cached (spec §6a). */
+  AVATAR_CACHE_DIR: z.string().default(".cache/avatars"),
   SMTP_URL: z.string().optional(),
   MAIL_FROM: z.string().default("openRMS Accounts <noreply@localhost>"),
 });

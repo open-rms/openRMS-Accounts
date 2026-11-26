@@ -112,5 +112,8 @@ export const profile = pgTable("profile", {
   /** {name, grid, city, bio, links, avatar}: "public" | "members" | "private"; missing = default. */
   visibility: jsonb().notNull().default(sql`'{}'::jsonb`),
   hidden: boolean().notNull().default(false),
+  /** none (callsign monogram) | gravatar (opt-in) | url (the user's https image), served via the avatar proxy (§6a). */
+  avatarSource: text("avatar_source").notNull().default("none"),
+  avatarUrl: text("avatar_url"),
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
