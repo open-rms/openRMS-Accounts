@@ -1,11 +1,40 @@
 # openRMS-Accounts
 
-- **Provides:** single sign-on and shared profiles (callsign, clubs, staff roles) for all
-  openRMS apps: OIDC / OAuth 2.1 issuer at `https://auth.openrms.dev`, account UI, events.
-- **Consumes:** PostgreSQL, SMTP. Contract in `openRMS-Spec/accounts/identity.md`.
-- **Status:** alpha (local only). Run: `pnpm install`, `pnpm build:ui` (account pages), `pnpm dev`
-  (port 8789: API, OIDC endpoints and the pages /login, /signup, /link, /consent, /account,
-  /clubs). See `PLAN.md`.
+Single sign-on for openRMS: one account with your callsign for every openRMS app.
+
+- **Provides:** an identity service (Better Auth as an OIDC / OAuth 2.1 issuer, production
+  `https://auth.openrms.dev`): sign-in and shared profiles (callsign and its verification,
+  clubs and extra callsigns, staff roles), first-party tokens per service, the device flow for
+  headless apps (RFC 8628 with RFC 8707 resources), a service API, signed webhooks, and the
+  account pages (`/login`, `/signup`, `/link`, `/consent`, `/account`, `/clubs`).
+- **Consumes:** PostgreSQL, SMTP. The contract is `openRMS-Spec/accounts/identity.md`.
+- **Used by:** openRMS Directory, Site, Rigs and Watch, later Gateway, Exchange and third parties.
+- **Status:** alpha, running locally; not yet deployed.
+
+## Quick start
+
+```sh
+pnpm install
+pnpm build:ui          # the account pages (ui/)
+cp .env.example .env   # set BETTER_AUTH_SECRET (openssl rand -base64 32)
+pnpm dev               # http://localhost:8789
+pnpm cli seed-clients  # register the openRMS OAuth clients (needs one superadmin)
+ACCOUNTS_E2E=1 pnpm test   # end-to-end tests against the running server
+```
+
+## What's in here
+
+| Path | What |
+|---|---|
+| `src/` | The service: Better Auth config (`auth.ts`), token claims, staff roles (`rbac.ts`), event outbox and webhooks, routes |
+| `ui/` | The account pages: SvelteKit static SPA, served by the service |
+| `packages/service-auth` | `@openrms/service-auth`: what other services use to trust Accounts (verify tokens offline against JWKS, verify webhooks, hash their own API keys). **MPL-2.0** |
+| `scripts/` | One-off migrations (`import-from-directory.ts`) |
+| `db/bootstrap.sql` | Creates the service's role and database on any PostgreSQL 16+ |
+
+`@openrms/service-auth` isn't published to npm yet. The Directory and Rigs depend on it with
+`link:../openRMS-Accounts/packages/service-auth`, so they need this repo checked out next to
+them. How it gets distributed is still to be decided.
 
 ## Database
 
@@ -30,4 +59,7 @@ Every default is local (`localhost`). A deployment sets its own public URLs in t
 environment: `BETTER_AUTH_URL` (the issuer), `TRUSTED_ORIGINS`, `APPS`, `FIRST_PARTY_AUDIENCES`,
 `RESOURCES` and `COOKIE_DOMAIN`. See `.env.example`.
 
-License: AGPL-3.0-or-later.
+## License
+
+AGPL-3.0-or-later (`LICENSE`), except `packages/service-auth`, which is MPL-2.0 so any app
+can use it.
