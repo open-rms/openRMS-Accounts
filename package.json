@@ -1,0 +1,37 @@
+{
+  "name": "openrms-accounts",
+  "version": "0.1.0",
+  "description": "Single sign-on and shared profiles for openRMS (OIDC issuer)",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.23.0",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "build": "tsc && pnpm build:ui",
+    "migrate": "tsx --env-file-if-exists=.env src/migrate.ts",
+    "cli": "tsx --env-file-if-exists=.env src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "import-directory": "tsx --env-file-if-exists=.env scripts/import-from-directory.ts",
+    "build:ui": "pnpm --dir ui install && pnpm --dir ui build"
+  },
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.28",
+    "@hono/node-server": "^2.1.11",
+    "@openrms/service-auth": "link:./packages/service-auth",
+    "better-auth": "1.7.28",
+    "hono": "^4.13.22",
+    "jose": "^6.2.18",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.7",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}

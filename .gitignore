@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+packages/*/node_modules
+packages/*/dist
+.dev-clients.env
+ui/node_modules
+ui/build
+ui/.svelte-kit

@@ -1,0 +1,203 @@
+// pnpm cli <command>
+//   set-role CALL superadmin|admin|moderator|user
+//   set-callsign OLD NEW              moderator callsign change (services re-check via user.updated)
+//   seed-clients                      register the clients of spec §8 that don't exist yet
+//   add-client ID NAME public|confidential|service [redirectUri ...]
+//   list-clients
+//   remove-client ID
+//   add-webhook NAME URL              prints the signing secret once
+//   list-webhooks
+import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { auth, withClientId } from "./auth.js";
+import { pool, q, tx } from "./db/pool.js";
+import { env } from "./env.js";
+import { emit } from "./events.js";
+import { isValidBaseCallsign, normalizeCallsign } from "./lib/callsign.js";
+import { migrate } from "./migrate.js";
+import { ROLE_NAMES, type RoleName } from "./rbac.js";
+import { audit } from "./routes/admin.js";
+
+type Kind = "public" | "confidential" | "service" | "first-party";
+
+interface ClientSpec {
+  id: string;
+  name: string;
+  kind: Kind;
+  redirectUris?: string[];
+  grants: string[];
+  /** Resource servers the client may get tokens for (RFC 8707). */
+  resources?: string[];
+}
+
+// The Directory's audiences among the configured resources (dev and production hosts).
+const directoryResources = () => env.resources.filter((r) => /\/\/directory\.|:8787$/.test(r));
+const rigsResources = () => env.resources.filter((r) => /\/\/rigs\.|:8790$/.test(r));
+const DEVICE = ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"];
+
+/** Spec §8. Redirect URIs for browser clients are added per deployment with add-client. */
+const SEED: ClientSpec[] = [
+  { id: "openrms-watch", name: "openRMS Watch", kind: "public", grants: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"], resources: directoryResources() },
+  // Headless apps that act for a user at Rigs (spec §8).
+  { id: "rigctlweb", name: "rigctlWeb", kind: "public", grants: DEVICE, resources: rigsResources() },
+  { id: "hamstack", name: "hamstack", kind: "public", grants: DEVICE, resources: rigsResources() },
+  { id: "openrms-directory", name: "openRMS Directory", kind: "service", grants: ["client_credentials"] },
+  { id: "openrms-rigs", name: "openRMS Rigs", kind: "service", grants: ["client_credentials"] },
+];
+
+export async function registerClient(spec: ClientSpec): Promise<{ client_id: string; client_secret?: string }> {
+  const isPublic = spec.kind === "public";
+  const body = {
+    client_name: spec.name,
+    grant_types: spec.grants,
+    token_endpoint_auth_method: isPublic ? "none" : "client_secret_basic",
+    ...(spec.redirectUris?.length ? { redirect_uris: spec.redirectUris, response_types: ["code"] as ["code"] } : {}),
+    ...(isPublic ? { application_type: "native" as const, require_pkce: true } : {}),
+    ...(spec.grants.includes("client_credentials")
+      ? { resources: [env.ISSUER, ...(spec.resources ?? [])], client_credentials_scopes: ["accounts.read"] }
+      : spec.resources?.length ? { resources: spec.resources } : {}),
+    // Only openRMS's own apps skip consent and get the staff `role` claim; a confidential
+    // third-party web app is neither (spec §4).
+    skip_consent: spec.kind === "service" || spec.kind === "first-party",
+    metadata: { service: spec.kind === "service", firstParty: spec.kind === "service" || spec.kind === "first-party" },
+  };
+  const headers = await superadminHeaders();
+  const res: unknown = await withClientId(spec.id, () => auth.api.adminCreateOAuthClient({ body, headers } as never));
+  return (res instanceof Response ? await res.json() : res) as { client_id: string; client_secret?: string };
+}
+
+/** Client management needs a superadmin session: mint a short-lived one for the CLI. */
+let cliHeaders: Headers | undefined;
+async function superadminHeaders(): Promise<Headers> {
+  if (cliHeaders) return cliHeaders;
+  const { rows } = await q<{ id: string }>(`SELECT id FROM "user" WHERE role LIKE '%superadmin%' ORDER BY "createdAt" LIMIT 1`);
+  if (!rows[0]) throw new Error("no superadmin yet: sign up, then pnpm cli set-role CALL superadmin");
+  const ctx = await auth.$context;
+  const session = await ctx.internalAdapter.createSession(rows[0].id, false, { expiresAt: new Date(Date.now() + 5 * 60_000) } as never);
+  cliSessionToken = session.token;
+  cliHeaders = new Headers({ authorization: `Bearer ${session.token}` });
+  return cliHeaders;
+}
+let cliSessionToken: string | undefined;
+
+/** Dev only: keep service client secrets in a gitignored file sibling services can read. */
+function saveDevSecret(clientId: string, secret: string) {
+  const file = new URL("../.dev-clients.env", import.meta.url);
+  const key = clientId.toUpperCase().replace(/-/g, "_");
+  const lines = existsSync(file) ? readFileSync(file, "utf8").split("\n").filter((l) => l && !l.startsWith(`${key}_CLIENT_`)) : ["# Dev-only OAuth client secrets (pnpm cli seed-clients). Never use in production."];
+  lines.push(`${key}_CLIENT_ID=${clientId}`, `${key}_CLIENT_SECRET=${secret}`);
+  writeFileSync(file, lines.join("\n") + "\n", { mode: 0o600 });
+}
+
+const [cmd, ...args] = process.argv.slice(2);
+await migrate();
+
+switch (cmd) {
+  case "set-role": {
+    const call = normalizeCallsign(args[0] ?? "");
+    const role = args[1] ?? "";
+    if (!ROLE_NAMES.includes(role as RoleName)) {
+      console.log(`usage: set-role CALLSIGN ${ROLE_NAMES.join("|")}`);
+      break;
+    }
+    const r = await q(`UPDATE "user" SET role = $2, "updatedAt" = now() WHERE callsign = $1 RETURNING id`, [call, role]);
+    if (r.rowCount) {
+      await audit(null, "role.set.cli", r.rows[0].id, role);
+      await emit("user.updated", { sub: r.rows[0].id });
+    }
+    console.log(r.rowCount ? `${call} is now ${role}` : "no such callsign");
+    break;
+  }
+  case "set-callsign": {
+    const oldC = normalizeCallsign(args[0] ?? "");
+    const newC = normalizeCallsign(args[1] ?? "");
+    if (!oldC || !isValidBaseCallsign(newC)) {
+      console.log("usage: set-callsign OLDCALL NEWCALL");
+      break;
+    }
+    const held = await q(`SELECT 1 FROM "user" WHERE callsign = $1 UNION ALL SELECT 1 FROM organization WHERE callsign = $1`, [newC]);
+    if (held.rowCount) {
+      console.log(`${newC} is already held by an account or club`);
+      break;
+    }
+    const moved = await tx(async (c) => {
+      const u = await c.query(
+        `UPDATE "user" SET callsign = $2, "callsignVerified" = false, "callsignVerifiedMethod" = NULL, "updatedAt" = now() WHERE callsign = $1 RETURNING id`,
+        [oldC, newC],
+      );
+      if (!u.rowCount) return null;
+      // Services hide what was listed under the old callsign (the Directory: gateways).
+      await emit("user.updated", { sub: u.rows[0].id, callsign: { from: oldC, to: newC } }, c);
+      return u.rows[0].id as string;
+    });
+    if (moved) await audit(null, "callsign.set.cli", moved, { from: oldC, to: newC });
+    console.log(moved ? `${oldC} is now ${newC} (unverified)` : "no such callsign");
+    break;
+  }
+  case "seed-clients": {
+    for (const spec of SEED) {
+      const { rowCount } = await q(`SELECT 1 FROM "oauthClient" WHERE "clientId" = $1`, [spec.id]);
+      if (rowCount) {
+        console.log(`${spec.id}: exists`);
+        continue;
+      }
+      const r = await registerClient(spec);
+      if (r.client_secret && process.env.NODE_ENV !== "production") {
+        saveDevSecret(r.client_id, r.client_secret);
+        console.log(`${r.client_id}: created, secret saved to .dev-clients.env`);
+      } else {
+        console.log(`${r.client_id}: created${r.client_secret ? `, secret ${r.client_secret} (shown once; put it in that service's env)` : ""}`);
+      }
+    }
+    break;
+  }
+  case "add-client": {
+    const [id, name, kind, ...redirectUris] = args;
+    if (!id || !name || !["public", "confidential", "service", "first-party"].includes(kind ?? "")) {
+      console.log("usage: add-client ID NAME public|confidential|service|first-party [redirectUri ...]");
+      break;
+    }
+    const grants = kind === "service" ? ["client_credentials"] : ["authorization_code", "refresh_token"];
+    const r = await registerClient({ id, name, kind: kind as Kind, redirectUris, grants });
+    console.log(`${r.client_id}: created${r.client_secret ? `, secret ${r.client_secret} (shown once)` : ""}`);
+    break;
+  }
+  case "remove-client": {
+    const r = await q(`DELETE FROM "oauthClient" WHERE "clientId" = $1`, [args[0] ?? ""]);
+    console.log(r.rowCount ? `${args[0]} removed` : "no such client");
+    break;
+  }
+  case "list-clients": {
+    const { rows } = await q(`SELECT "clientId", name, "grantTypes", "redirectUris", disabled FROM "oauthClient" ORDER BY "createdAt"`);
+    console.table(rows);
+    break;
+  }
+  case "add-webhook": {
+    const [name, url] = args;
+    if (!name || !url) {
+      console.log("usage: add-webhook NAME URL");
+      break;
+    }
+    const secret = randomBytes(32).toString("base64url");
+    await q(
+      `INSERT INTO webhook_subscriber (name, url, secret) VALUES ($1, $2, $3)
+       ON CONFLICT (name) DO UPDATE SET url = EXCLUDED.url, secret = EXCLUDED.secret, active = true`,
+      [name, url, secret],
+    );
+    console.log(`${name} -> ${url}\nsigning secret (shown once): ${secret}`);
+    break;
+  }
+  case "list-webhooks": {
+    const { rows } = await q(
+      `SELECT s.name, s.url, s.active,
+              (SELECT count(*) FROM event_delivery d WHERE d.subscriber_id = s.id AND d.delivered_at IS NULL)::int AS pending
+         FROM webhook_subscriber s ORDER BY s.name`,
+    );
+    console.table(rows);
+    break;
+  }
+  default:
+    console.log("usage: pnpm cli set-role CALL ROLE | set-callsign OLD NEW | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | add-webhook NAME URL | list-webhooks");
+}
+if (cliSessionToken) await q(`DELETE FROM session WHERE token = $1`, [cliSessionToken]);
+await pool.end();
