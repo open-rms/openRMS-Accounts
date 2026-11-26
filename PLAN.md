@@ -76,6 +76,15 @@ in through Accounts. Left for the exit test: Watch's device-flow switch (waiting
 go). Old Better Auth tables are still in the Directory's dev database until the user approves
 dropping them.
 
+## Hosting choice (2026-11-25)
+
+Accounts runs our own Better Auth, never a managed auth product. Neon's Managed Better Auth was
+considered and ruled out: no custom fields, hooks, plugins or server code (Accounts needs the
+callsign field and uniqueness hook, custom claims, device authorization, the club and service
+APIs, webhooks), no documented export to self-hosted, and no documented custom domain for the
+issuer. A hosted **plain Postgres** (Neon or any other) is fine for `DATABASE_URL`: moving back
+is an ordinary dump and restore.
+
 ## Phases
 
 - **AC0 (now):** spec `identity.md`, domain `auth.openrms.dev`, project registered. Agree the
