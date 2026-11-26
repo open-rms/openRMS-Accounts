@@ -57,8 +57,10 @@ self-hoster runs one login for every app.
 
 ## Deployment
 
-Node + PostgreSQL. Own database `openrms_accounts`; it may share a Postgres instance with
-other services, but no service reads another's database. Dev port **8789**. Env:
+Node + PostgreSQL 16+. Own database and role `openrms_accounts` (create with
+`db/bootstrap.sql`); it shares a Postgres instance with other services, but no service reads
+another's database. The openrms.dev deployment uses Neon (umbrella `PLAN.md`, Database); the
+code stays provider-neutral. Dev port **8789**. Env:
 `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `DATABASE_URL`, `COOKIE_DOMAIN` (`.openrms.dev`),
 `TRUSTED_ORIGINS`, SMTP settings.
 
