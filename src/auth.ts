@@ -1,5 +1,5 @@
 // openRMS Accounts: Better Auth as the single sign-on for every openRMS app.
-// Contract: openRMS-Spec/accounts/identity.md. Account rules moved here from openRMS-Directory.
+// Contract: openRMS-Spec/accounts/identity.md. Account rules moved here from openRMS-Atlas (then called the Directory).
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { admin, bearer, jwt, openAPI, organization } from "better-auth/plugins";
@@ -200,7 +200,7 @@ export const auth = betterAuth({
       loginPage: `${env.UI_URL}/login`,
       consentPage: `${env.UI_URL}/consent`,
       scopes: [...SCOPES],
-      // Services (Directory, Rigs) plus Accounts itself, for the service API (client credentials).
+      // Services (Atlas, Rigs) plus Accounts itself, for the service API (client credentials).
       resources: [...new Set([...env.resources, env.ISSUER])],
       accessTokenExpiresIn: 15 * 60,
       refreshTokenExpiresIn: 30 * 24 * 3600,
@@ -263,7 +263,7 @@ export const auth = betterAuth({
           await pool.query(`UPDATE "user" SET "updatedAt" = now() WHERE id IN (SELECT "userId" FROM member WHERE "organizationId" = $1)`, [org.id]);
         },
         afterDeleteOrganization: async ({ organization: org }) => {
-          // Services clean up their own data (the Directory removes the club's listings).
+          // Services clean up their own data (Atlas removes the club's listings).
           await emit("club.deleted", { id: org.id, callsign: (org as Record<string, unknown>).callsign, name: org.name });
         },
         afterAddMember: async ({ member, organization: org }) => {

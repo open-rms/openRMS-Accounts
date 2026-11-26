@@ -8,7 +8,7 @@ Single sign-on for openRMS: one account with your callsign for every openRMS app
   headless apps (RFC 8628 with RFC 8707 resources), a service API, signed webhooks, and the
   account pages (`/login`, `/signup`, `/link`, `/consent`, `/account`, `/clubs`).
 - **Consumes:** PostgreSQL, SMTP. The contract is `openRMS-Spec/accounts/identity.md`.
-- **Used by:** openRMS Directory, Site, Rigs and Watch, later Gateway, Exchange and third parties.
+- **Used by:** openRMS Atlas (formerly the Directory) and its Site, Rigs and Watch, later Gateway, Exchange and third parties.
 - **Status:** alpha, running locally; not yet deployed.
 
 ## Quick start
@@ -32,7 +32,7 @@ ACCOUNTS_E2E=1 pnpm test   # end-to-end tests against the running server
 | `scripts/` | One-off migrations (`import-from-directory.ts`) |
 | `db/bootstrap.sql` | Creates the service's role and database on any PostgreSQL 16+ |
 
-`@openrms/service-auth` isn't published to npm yet. The Directory and Rigs depend on it with
+`@openrms/service-auth` isn't published to npm yet. Atlas and Rigs depend on it with
 `link:../openRMS-Accounts/packages/service-auth`, so they need this repo checked out next to
 them. How it gets distributed is still to be decided.
 
@@ -71,8 +71,9 @@ environment: `BETTER_AUTH_URL` (the issuer), `TRUSTED_ORIGINS`, `APPS`, `FIRST_P
 
 Operator commands (`pnpm cli …`): `bootstrap CALL`, `set-role CALL ROLE`, `set-callsign OLD NEW`,
 `delete-user CALL [--force]` (emits `user.deleted`; staff can also use
-`POST /api/auth/admin/remove-user`), `seed-clients`, `add-client`, `list-clients`,
-`add-webhook NAME URL`, `list-webhooks`.
+`POST /api/auth/admin/remove-user`), `seed-clients`, `add-client`, `list-clients`, `rename-client OLD NEW`,
+`link-resource CLIENT URL` / `unlink-resource`,
+`add-webhook NAME URL`, `rename-webhook OLD NEW [URL]`, `list-webhooks`.
 
 ## License
 

@@ -6,9 +6,12 @@
 //   seed-clients                      register the clients of spec §8 that don't exist yet
 //   add-client ID NAME public|confidential|service [redirectUri ...]
 //   list-clients
+//   rename-client OLD NEW             change a client id, keeping its secret and links
+//   link-resource CLIENT URL          let a client request tokens for a resource (unlink-resource to undo)
 //   remove-client ID
 //   add-webhook NAME URL              prints the signing secret once
 //   list-webhooks
+//   rename-webhook OLD NEW [URL]      rename a subscriber (same secret), optionally new URL
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { auth, withClientId } from "./auth.js";
@@ -32,18 +35,18 @@ interface ClientSpec {
   resources?: string[];
 }
 
-// The Directory's audiences among the configured resources (dev and production hosts).
-const directoryResources = () => env.resources.filter((r) => /\/\/directory\.|:8787$/.test(r));
+// Atlas's audiences among the configured resources (dev and production hosts).
+const atlasResources = () => env.resources.filter((r) => /\/\/atlas\.|:8787$/.test(r));
 const rigsResources = () => env.resources.filter((r) => /\/\/rigs\.|:8790$/.test(r));
 const DEVICE = ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"];
 
 /** Spec §8. Redirect URIs for browser clients are added per deployment with add-client. */
 const SEED: ClientSpec[] = [
-  { id: "openrms-watch", name: "openRMS Watch", kind: "public", grants: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"], resources: directoryResources() },
+  { id: "openrms-watch", name: "openRMS Watch", kind: "public", grants: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"], resources: atlasResources() },
   // Headless apps that act for a user at Rigs (spec §8).
   { id: "rigctlweb", name: "rigctlWeb", kind: "public", grants: DEVICE, resources: rigsResources() },
   { id: "hamstack", name: "hamstack", kind: "public", grants: DEVICE, resources: rigsResources() },
-  { id: "openrms-directory", name: "openRMS Directory", kind: "service", grants: ["client_credentials"] },
+  { id: "openrms-atlas", name: "openRMS Atlas", kind: "service", grants: ["client_credentials"] },
   { id: "openrms-rigs", name: "openRMS Rigs", kind: "service", grants: ["client_credentials"] },
 ];
 
@@ -145,7 +148,7 @@ switch (cmd) {
         [oldC, newC],
       );
       if (!u.rowCount) return null;
-      // Services hide what was listed under the old callsign (the Directory: gateways).
+      // Services hide what was listed under the old callsign (Atlas: gateways).
       await emit("user.updated", { sub: u.rows[0].id, callsign: { from: oldC, to: newC } }, c);
       return u.rows[0].id as string;
     });
@@ -227,6 +230,57 @@ switch (cmd) {
     console.log(r.rowCount ? `${args[0]} removed` : "no such client");
     break;
   }
+  case "rename-client": {
+    // Keeps the client's secret, settings, resource links and tokens; only the id changes.
+    const [from, to] = args;
+    if (!from || !to) {
+      console.log("usage: rename-client OLD_ID NEW_ID");
+      break;
+    }
+    const done = await tx(async (c) => {
+      const { rowCount } = await c.query(`SELECT 1 FROM "oauthClient" WHERE "clientId" = $1`, [from]);
+      if (!rowCount) return `no client ${from}`;
+      if ((await c.query(`SELECT 1 FROM "oauthClient" WHERE "clientId" = $1`, [to])).rowCount) return `${to} already exists`;
+      const { rows } = await c.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'oauthClient' AND column_name NOT IN ('id', 'clientId')`,
+      );
+      const cols = rows.map((r) => `"${r.column_name}"`).join(", ");
+      // Child rows reference "clientId" without ON UPDATE CASCADE: insert the new row, move children, drop the old.
+      await c.query(`INSERT INTO "oauthClient" (id, "clientId", ${cols}) SELECT gen_random_uuid()::text, $2, ${cols} FROM "oauthClient" WHERE "clientId" = $1`, [from, to]);
+      for (const t of ["oauthClientResource", "oauthRefreshToken", "oauthAccessToken", "oauthConsent"]) {
+        await c.query(`UPDATE "${t}" SET "clientId" = $2 WHERE "clientId" = $1`, [from, to]);
+      }
+      await c.query(`DELETE FROM "oauthClient" WHERE "clientId" = $1`, [from]);
+      return null;
+    });
+    console.log(done ?? `${from} is now ${to} (same secret)`);
+    break;
+  }
+  case "link-resource":
+  case "unlink-resource": {
+    // Which audiences a client may get tokens for (RFC 8707). The resource must be in RESOURCES.
+    const [clientId, resource] = args;
+    if (!clientId || !resource) {
+      console.log(`usage: ${cmd} CLIENT_ID RESOURCE_URL`);
+      break;
+    }
+    if (cmd === "unlink-resource") {
+      const r = await q(`DELETE FROM "oauthClientResource" WHERE "clientId" = $1 AND "resourceId" = $2`, [clientId, resource]);
+      console.log(r.rowCount ? `${clientId} unlinked from ${resource}` : "no such link");
+      break;
+    }
+    if (!(await q(`SELECT 1 FROM "oauthResource" WHERE identifier = $1`, [resource])).rowCount) {
+      console.log(`${resource} isn't a known resource: add it to RESOURCES and restart Accounts first`);
+      break;
+    }
+    await q(
+      `INSERT INTO "oauthClientResource" (id, "clientId", "resourceId", "createdAt") VALUES (gen_random_uuid()::text, $1, $2, now())
+       ON CONFLICT ("clientId", "resourceId") DO NOTHING`,
+      [clientId, resource],
+    );
+    console.log(`${clientId} may request ${resource}`);
+    break;
+  }
   case "list-clients": {
     const { rows } = await q(`SELECT "clientId", name, "grantTypes", "redirectUris", disabled FROM "oauthClient" ORDER BY "createdAt"`);
     console.table(rows);
@@ -247,6 +301,17 @@ switch (cmd) {
     console.log(`${name} -> ${url}\nsigning secret (shown once): ${secret}`);
     break;
   }
+  case "rename-webhook": {
+    // Keeps the signing secret and pending deliveries; optionally points it at a new URL.
+    const [from, to, url] = args;
+    if (!from || !to) {
+      console.log("usage: rename-webhook OLD_NAME NEW_NAME [URL]");
+      break;
+    }
+    const r = await q(`UPDATE webhook_subscriber SET name = $2, url = COALESCE($3, url) WHERE name = $1`, [from, to, url ?? null]);
+    console.log(r.rowCount ? `webhook ${from} is now ${to}${url ? ` -> ${url}` : ""} (same secret)` : `no webhook ${from}`);
+    break;
+  }
   case "list-webhooks": {
     const { rows } = await q(
       `SELECT s.name, s.url, s.active,
@@ -257,7 +322,7 @@ switch (cmd) {
     break;
   }
   default:
-    console.log("usage: pnpm cli set-role CALL ROLE | set-callsign OLD NEW | delete-user CALL [--force] | bootstrap CALL | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | add-webhook NAME URL | list-webhooks");
+    console.log("usage: pnpm cli set-role CALL ROLE | set-callsign OLD NEW | delete-user CALL [--force] | bootstrap CALL | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | rename-client OLD NEW | link-resource CLIENT URL | unlink-resource CLIENT URL | add-webhook NAME URL | rename-webhook OLD NEW [URL] | list-webhooks");
 }
 if (cliSessionToken) await q(`DELETE FROM session WHERE token = $1`, [cliSessionToken]);
 await pool.end();

@@ -47,5 +47,5 @@
 </main>
 
 <footer class="text-muted-foreground mx-auto mt-12 max-w-[900px] border-t px-4 pt-4 pb-8 text-sm">
-  One openRMS account signs you in to every openRMS app: the Directory, Rigs, Watch and more. openRMS is open source (AGPL-3.0).
+  One openRMS account signs you in to every openRMS app: Atlas, Rigs, Watch and more. openRMS is open source (AGPL-3.0).
 </footer>

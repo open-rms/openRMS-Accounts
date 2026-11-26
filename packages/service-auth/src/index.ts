@@ -36,7 +36,7 @@ export interface AccessClaims {
 }
 
 export interface VerifyOptions {
-  /** This service's audience, e.g. "https://directory.openrms.dev". */
+  /** This service's audience, e.g. "https://atlas.openrms.dev". */
   audience: string;
   /** Trusted issuers. Default: OPENRMS_ISSUER (comma-separated). None configured: every token is refused. */
   issuers?: string[];

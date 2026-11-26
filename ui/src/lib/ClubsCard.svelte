@@ -49,7 +49,7 @@
     run(() => api.removeClubMember(c.id, m.userId), leaving ? `You left ${c.callsign}.` : `${m.callsign} removed.`);
   }
   function del(c: Club) {
-    if (!window.confirm(`Delete ${c.callsign}? Every openRMS service removes what was listed under it (the Directory: its gateways and Winlink claims).`)) return;
+    if (!window.confirm(`Delete ${c.callsign}? Every openRMS service removes what was listed under it (Atlas: its gateways and Winlink claims).`)) return;
     run(() => api.deleteClub(c.id), `${c.callsign} deleted.`);
   }
   const canManage = (c: Club) => c.myRole === "owner" || c.myRole === "admin";
@@ -60,7 +60,7 @@
     <Card.Title><h2 class="m-0">Clubs and other callsigns</h2></Card.Title>
     <Card.Description>
       Add a club, special-event or second callsign you're responsible for. Everyone you add can act for that callsign in
-      every openRMS app (for example, list and edit its gateways in the Directory). Owners manage the member list. A new
+      every openRMS app (for example, list and edit its gateways in Atlas). Owners manage the member list. A new
       callsign works right away and shows as unverified until a moderator confirms it (for a club call, that you're its trustee).
     </Card.Description>
   </Card.Header>

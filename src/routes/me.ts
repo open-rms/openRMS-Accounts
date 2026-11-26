@@ -1,4 +1,4 @@
-// The signed-in account: profile and clubs. Club routes moved from openRMS-Directory; changes
+// The signed-in account: profile and clubs. Club routes moved from openRMS-Atlas (then the Directory); changes
 // that bypass Better Auth's own endpoints emit their events here (spec §7).
 import { Hono } from "hono";
 import { z } from "zod";

@@ -1,4 +1,4 @@
-// Staff roles for openRMS as a whole, and the rank rule. Moved from openRMS-Directory.
+// Staff roles for openRMS as a whole, and the rank rule. Moved from openRMS-Atlas (then the Directory).
 //
 //   superadmin  everything, including assigning admins and impersonation
 //   admin       users (ban, sessions), assigns moderators

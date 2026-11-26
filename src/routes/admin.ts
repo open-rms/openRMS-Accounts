@@ -1,4 +1,4 @@
-// Staff tools for accounts and clubs (moved from openRMS-Directory). Every route needs a staff
+// Staff tools for accounts and clubs (moved from openRMS-Atlas (then the Directory)). Every route needs a staff
 // role and the permission from src/rbac.ts; actions go to Accounts' audit_log.
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";

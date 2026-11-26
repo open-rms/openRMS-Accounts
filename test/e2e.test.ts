@@ -9,7 +9,7 @@ import { auth } from "../src/auth.js";
 import { pool, q } from "../src/db/pool.js";
 
 const BASE = process.env.ACCOUNTS_URL ?? "http://localhost:8789";
-const DIRECTORY = "http://localhost:8787";
+const DIRECTORY = "http://localhost:8787"; // Atlas (formerly the Directory)
 const run = process.env.ACCOUNTS_E2E ? describe : describe.skip;
 
 const devClients = (() => {
@@ -122,9 +122,9 @@ run("openRMS Accounts e2e", () => {
   }, 20_000);
 
   it("gives service clients a token for the Accounts API (spec §6)", async () => {
-    const secret = devClients.OPENRMS_DIRECTORY_CLIENT_SECRET;
+    const secret = devClients.OPENRMS_ATLAS_CLIENT_SECRET;
     expect(secret, "run pnpm cli seed-clients and keep .dev-clients.env").toBeTruthy();
-    const basic = Buffer.from(`openrms-directory:${secret}`).toString("base64");
+    const basic = Buffer.from(`openrms-atlas:${secret}`).toString("base64");
     const tok = await api("/api/auth/oauth2/token", {
       method: "POST",
       headers: { authorization: `Basic ${basic}`, ...FORM },
@@ -142,7 +142,7 @@ run("openRMS Accounts e2e", () => {
     expect((await api(`/api/v1/users/${found.body.users[0].sub}`, { headers: { authorization: `Bearer ${userTok.body.token}`, cookie: "" } })).status).toBe(401);
   });
 
-  it("links a device with a token bound to the Directory (RFC 8628 + 8707)", async () => {
+  it("links a device with a token bound to Atlas (RFC 8628 + 8707)", async () => {
     const start = await api("/api/auth/device/code", {
       method: "POST",
       ...form({ client_id: "openrms-watch", scope: "openid callsign clubs offline_access", resource: DIRECTORY }),

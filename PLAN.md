@@ -135,8 +135,10 @@ issuer. Any **plain Postgres** (local, in the app container, or hosted) is fine 
 ## Open questions
 
 - ~~Q1~~ **Decided:** the Directory keeps its keys in its own table (Directory and Watch agree).
-- ~~Q2~~ **Decided:** one subdomain per project. Directory is `directory.openrms.dev`
-  (`aud` `https://directory.openrms.dev`); no generic `api.` host.
+- ~~Q2~~ **Decided:** one subdomain per project; no generic `api.` host. The Directory was
+  renamed **Atlas** (2026-11-26): `atlas.openrms.dev`, `aud` `https://atlas.openrms.dev`, service
+  client `openrms-atlas`; `directory.openrms.dev` redirects. Sections above that say "the
+  Directory" describe history before the rename.
 - **Q3:** Pin the exact JWT endpoint and audience (`resource`) behaviour of `oauth-provider`
   / `jwt` in 1.7 for the code grant and first-party tokens during AC1. Device grant: checked,
   it honours `resource`.

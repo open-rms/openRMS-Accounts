@@ -1,7 +1,7 @@
 <script lang="ts">
   // Device linking (RFC 8628): a device (openRMS-Watch, rigctlWeb, hamstack, ...) shows a code;
   // approving it here gives that device a token for one openRMS service. The device then does the
-  // rest with that service itself (Watch picks or creates its watcher with the Directory).
+  // rest with that service itself (Watch picks or creates its watcher with Atlas).
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { session } from "#lib/auth.ts";
@@ -40,7 +40,7 @@
         <p class="mt-0"><b>Approved.</b> Go back to your device: it finishes linking within a few seconds.</p>
         <p class="mb-0 text-sm text-muted-foreground">
           An openRMS-Watch receiver then asks which of your watchers it is (or creates one) and gets its own upload key, which you
-          can revoke from the Directory's dashboard. Changing your password signs every linked device out.
+          can revoke from your Atlas dashboard. Changing your password signs every linked device out.
         </p>
       </Card.Content>
     </Card.Root>
