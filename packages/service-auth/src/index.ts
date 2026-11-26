@@ -38,7 +38,7 @@ export interface AccessClaims {
 export interface VerifyOptions {
   /** This service's audience, e.g. "https://directory.openrms.dev". */
   audience: string;
-  /** Trusted issuers. Default: OPENRMS_ISSUER, else https://auth.openrms.dev. */
+  /** Trusted issuers. Default: OPENRMS_ISSUER (comma-separated). None configured: every token is refused. */
   issuers?: string[];
   /** Allowed clock skew in seconds (default 30). */
   clockTolerance?: number;
@@ -51,7 +51,6 @@ export class TokenError extends Error {
   }
 }
 
-const DEFAULT_ISSUER = "https://auth.openrms.dev";
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 const jwksUriCache = new Map<string, Promise<string>>();
 
@@ -61,7 +60,7 @@ function trim(u: string) {
 
 export function defaultIssuers(): string[] {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.OPENRMS_ISSUER;
-  return (env ?? DEFAULT_ISSUER).split(",").map((s) => trim(s.trim())).filter(Boolean);
+  return (env ?? "").split(",").map((s) => trim(s.trim())).filter(Boolean);
 }
 
 /** The issuer's jwks_uri, from OIDC discovery (cached per process). */

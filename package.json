@@ -13,6 +13,8 @@
     "migrate": "tsx --env-file-if-exists=.env src/migrate.ts",
     "cli": "tsx --env-file-if-exists=.env src/cli.ts",
     "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
     "test": "vitest run",
     "import-directory": "tsx --env-file-if-exists=.env scripts/import-from-directory.ts",
     "build:ui": "pnpm --dir ui install && pnpm --dir ui build"
@@ -22,6 +24,7 @@
     "@hono/node-server": "^2.1.11",
     "@openrms/service-auth": "link:./packages/service-auth",
     "better-auth": "1.7.28",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.22",
     "jose": "^6.2.18",
     "pg": "^8.23.1",
@@ -30,6 +33,7 @@
   "devDependencies": {
     "@types/node": "^26.6.7",
     "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.1"

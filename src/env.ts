@@ -15,11 +15,11 @@ const schema = z.object({
   /** Where the account pages live (sign-in, consent, device link). Default: Accounts itself (ui/). */
   UI_URL: z.string().optional(),
   /** First-party apps by origin, for "continue to ..." and safe redirects: "origin|Name,origin|Name". */
-  APPS: z.string().default("http://localhost:5173|openRMS Directory,http://localhost:5174|openRMS Rigs,https://openrms.dev|openRMS Directory,https://rigs.openrms.dev|openRMS Rigs"),
+  APPS: z.string().default("http://localhost:5173|openRMS Directory,http://localhost:5174|openRMS Rigs"),
   /** Comma-separated audiences first-party apps may request from /api/v1/token (spec §3a). */
-  FIRST_PARTY_AUDIENCES: z.string().default("http://localhost:8787,http://localhost:8790,https://directory.openrms.dev,https://rigs.openrms.dev"),
+  FIRST_PARTY_AUDIENCES: z.string().default("http://localhost:8787,http://localhost:8790"),
   /** Comma-separated resource servers (audiences) OAuth clients may request (RFC 8707). */
-  RESOURCES: z.string().default("http://localhost:8787,http://localhost:8790,https://directory.openrms.dev,https://rigs.openrms.dev"),
+  RESOURCES: z.string().default("http://localhost:8787,http://localhost:8790"),
   REQUIRE_EMAIL_VERIFICATION: z.stringbool().default(false),
   SMTP_URL: z.string().optional(),
   MAIL_FROM: z.string().default("openRMS Accounts <noreply@localhost>"),
