@@ -8,10 +8,15 @@ import { pool, q } from "./db/pool.js";
 
 export type EventType =
   | "user.updated" | "user.callsign_verified" | "user.banned" | "user.unbanned" | "user.deleted"
-  | "club.created" | "club.updated" | "club.deleted" | "club.member_added" | "club.member_removed" | "club.verified";
+  | "club.created" | "club.updated" | "club.deleted" | "club.member_added" | "club.member_removed" | "club.verified"
+  | "key.revoked";
 
-/** Queue an event for every active subscriber. Pass the transaction client to emit atomically. */
-export async function emit(type: EventType, data: Record<string, unknown>, client?: PoolClient): Promise<string> {
+/**
+ * Queue an event for every active subscriber, or with `audience` only for the subscriber that is
+ * that service (its `audience` column, or else a URL on that origin). Pass the transaction client
+ * to emit atomically.
+ */
+export async function emit(type: EventType, data: Record<string, unknown>, client?: PoolClient, audience?: string): Promise<string> {
   const id = randomUUID();
   const run = client ? client.query.bind(client) : pool.query.bind(pool);
   // Every club event names the club, so receivers never see a club without its callsign and
@@ -21,6 +26,15 @@ export async function emit(type: EventType, data: Record<string, unknown>, clien
     if (rows[0]) data = { ...data, name: data.name ?? rows[0].name, callsign: data.callsign ?? rows[0].callsign };
   }
   await run(`INSERT INTO event_outbox (id, type, data) VALUES ($1, $2, $3)`, [id, type, JSON.stringify(data)]);
+  if (audience) {
+    await run(
+      `INSERT INTO event_delivery (event_id, subscriber_id)
+       SELECT $1, id FROM webhook_subscriber
+        WHERE active AND (audience = $2 OR (audience IS NULL AND (url = $2 OR url LIKE $2 || '/%')))`,
+      [id, audience.replace(/\/+$/, "")],
+    );
+    return id;
+  }
   await run(
     `INSERT INTO event_delivery (event_id, subscriber_id) SELECT $1, id FROM webhook_subscriber WHERE active`,
     [id],

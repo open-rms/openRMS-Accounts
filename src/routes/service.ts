@@ -27,11 +27,12 @@ async function isServiceClient(clientId: string): Promise<boolean> {
   return ok;
 }
 
-const requireService = createMiddleware<Vars>(async (c, next) => {
+/** Client-credentials callers only, holding `scope` (accounts.read, or accounts.keys for API key routes). */
+export const serviceAuth = (scope: "accounts.read" | "accounts.keys") => createMiddleware<Vars>(async (c, next) => {
   try {
     const claims = await verifyAccessToken(bearerToken(c.req.header("authorization")), { audience: env.ISSUER, issuers: [env.ISSUER] });
     // Client credentials: no user, the subject is the client itself.
-    if (!claims.client_id || claims.sub !== claims.client_id || !claims.scope.includes("accounts.read") || !(await isServiceClient(claims.client_id))) {
+    if (!claims.client_id || claims.sub !== claims.client_id || !claims.scope.includes(scope) || !(await isServiceClient(claims.client_id))) {
       return c.json({ error: "service clients only" }, 403);
     }
     c.set("clientId", claims.client_id);
@@ -41,7 +42,11 @@ const requireService = createMiddleware<Vars>(async (c, next) => {
   await next();
 });
 // Only the service paths: this router is mounted at /api/v1 next to other routes.
-for (const path of ["/users", "/users/*", "/clubs", "/clubs/*"]) serviceRoutes.use(path, requireService);
+// /users/{sub}/keys is an API key route (accounts.keys), mounted from routes/keys.ts first.
+const requireService = serviceAuth("accounts.read");
+for (const path of ["/users", "/users/*", "/clubs", "/clubs/*"]) {
+  serviceRoutes.use(path, async (c, next) => (/^\/api\/v1\/users\/[^/]+\/keys$/.test(c.req.path) ? next() : requireService(c, next)));
+}
 
 const publicUser = async (id: string) => {
   const u = await loadUser(id);

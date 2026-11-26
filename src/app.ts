@@ -9,6 +9,7 @@ import { oauthProviderAuthServerMetadata, oauthProviderOpenIdConfigMetadata } fr
 import { auth } from "./auth.js";
 import { env } from "./env.js";
 import { adminRoutes } from "./routes/admin.js";
+import { keyRoutes, meKeyRoutes, userKeyRoutes } from "./routes/keys.js";
 import { meRoutes } from "./routes/me.js";
 import { serviceRoutes } from "./routes/service.js";
 import { tokenRoutes } from "./routes/token.js";
@@ -58,7 +59,10 @@ export function createApp() {
   app.get("/.well-known/oauth-authorization-server", (c) => asConfig(c.req.raw));
 
   app.route("/api/v1/token", tokenRoutes);
+  app.route("/api/v1/me/keys", meKeyRoutes);
   app.route("/api/v1/me", meRoutes);
+  app.route("/api/v1/keys", keyRoutes);
+  app.route("/api/v1", userKeyRoutes);
   app.route("/api/v1/admin", adminRoutes);
   app.route("/api/v1", serviceRoutes);
 

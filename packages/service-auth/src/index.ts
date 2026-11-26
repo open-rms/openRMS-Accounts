@@ -1,7 +1,7 @@
 // @openrms/service-auth: what an openRMS service needs to trust openRMS-Accounts.
-// Contract: openRMS-Spec/accounts/identity.md (§3 tokens, §4 claims, §5 keys, §7 webhooks).
+// Contract: openRMS-Spec/accounts/identity.md (§3 tokens, §4 claims, §5 API keys, §7 webhooks).
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
+import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 
 export type ClubRole = "owner" | "admin" | "member";
 export type StaffRole = "user" | "moderator" | "admin" | "superadmin";
@@ -45,7 +45,7 @@ export interface VerifyOptions {
 }
 
 export class TokenError extends Error {
-  constructor(message: string, readonly code: "missing" | "invalid" | "expired" | "untrusted_issuer" | "wrong_audience") {
+  constructor(message: string, readonly code: "missing" | "invalid" | "expired" | "untrusted_issuer" | "wrong_audience" | "revoked") {
     super(message);
     this.name = "TokenError";
   }
@@ -92,6 +92,18 @@ async function keySet(issuer: string) {
   return ks;
 }
 
+/** Prefix and JWT `typ` of an Accounts API key (spec §5.1). */
+export const KEY_PREFIX = "ormk_";
+export const KEY_TYP = "openrms-key+jwt";
+
+function headerTyp(jwt: string): string | undefined {
+  try {
+    return decodeProtectedHeader(jwt).typ;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read `Authorization: Bearer <token>`; returns null when absent. */
 export function bearerToken(header: string | null | undefined): string | null {
   const m = /^Bearer\s+(.+)$/i.exec(header ?? "");
@@ -110,9 +122,17 @@ function decodeIss(token: string): string | undefined {
 /**
  * Verify an Accounts access token offline against the issuer's JWKS.
  * Checks signature, issuer (must be trusted), audience and expiry; returns the claims.
+ * Refuses API keys: use verifyBearer where keys are allowed.
  */
 export async function verifyAccessToken(token: string | null | undefined, opts: VerifyOptions): Promise<AccessClaims> {
   if (!token) throw new TokenError("no token", "missing");
+  if (token.startsWith(KEY_PREFIX) || headerTyp(token) === KEY_TYP) throw new TokenError("API keys are not accepted here", "invalid");
+  const claims = await verifyJwt(token, opts);
+  if ((claims as { token_use?: unknown }).token_use === "api_key") throw new TokenError("API keys are not accepted here", "invalid");
+  return claims;
+}
+
+async function verifyJwt(token: string, opts: VerifyOptions & { typ?: string }): Promise<AccessClaims> {
   const issuers = (opts.issuers ?? defaultIssuers()).map(trim);
   const iss = decodeIss(token);
   if (!iss) throw new TokenError("not a JWT", "invalid");
@@ -122,6 +142,7 @@ export async function verifyAccessToken(token: string | null | undefined, opts: 
       issuer: [iss, `${iss}/`],
       audience: opts.audience,
       clockTolerance: opts.clockTolerance ?? 30,
+      ...(opts.typ ? { typ: opts.typ } : {}),
     });
     if (typeof payload.sub !== "string" || !payload.sub) throw new TokenError("token has no subject", "invalid");
     const scope = typeof payload.scope === "string" ? payload.scope.split(" ").filter(Boolean) : Array.isArray(payload.scope) ? (payload.scope as string[]) : [];
@@ -134,6 +155,149 @@ export async function verifyAccessToken(token: string | null | undefined, opts: 
       throw new TokenError(`token is not for ${opts.audience}`, "wrong_audience");
     }
     throw new TokenError(`invalid token: ${(e as Error).message}`, "invalid");
+  }
+}
+
+// ---------------------------------------------------------------- API keys (spec §5)
+
+/** Claims of an Accounts API key (spec §5.1). */
+export interface KeyClaims {
+  iss: string;
+  sub: string;
+  aud: string;
+  exp: number;
+  iat?: number;
+  jti: string;
+  scope: string[];
+  token_use: "api_key";
+  /** Owner's callsign when the key was minted: display only, key data on `sub`. */
+  callsign?: string;
+  renewable?: boolean;
+  /** On a key made by renewal: the jti it replaces (spec §5.4). */
+  replaces?: string;
+}
+
+export type Bearer = { kind: "access"; claims: AccessClaims } | { kind: "key"; claims: KeyClaims };
+
+export interface VerifyBearerOptions extends VerifyOptions {
+  /** The service's persisted denylist lookup (spec §5.5). Required: keys live for months. */
+  isRevoked: (jti: string) => boolean | Promise<boolean>;
+}
+
+/**
+ * Verify `Authorization: Bearer` that may be an access token or an API key (`ormk_…`).
+ * Keys are checked like tokens (offline, JWKS), plus `typ`, `token_use`, a single audience and
+ * the denylist. Staff routes must refuse `kind: "key"` (spec §5.2), and every key use should
+ * check the owner against the service's account cache (bans).
+ */
+export async function verifyBearer(token: string | null | undefined, opts: VerifyBearerOptions): Promise<Bearer> {
+  if (!token) throw new TokenError("no token", "missing");
+  if (!token.startsWith(KEY_PREFIX)) return { kind: "access", claims: await verifyAccessToken(token, opts) };
+  const jwt = token.slice(KEY_PREFIX.length);
+  const c = (await verifyJwt(jwt, { ...opts, typ: KEY_TYP })) as unknown as KeyClaims & { aud: string | string[] };
+  if (c.token_use !== "api_key") throw new TokenError("not an API key", "invalid");
+  if (typeof c.jti !== "string" || !c.jti) throw new TokenError("API key has no jti", "invalid");
+  if (Array.isArray(c.aud) && c.aud.length !== 1) throw new TokenError("an API key has exactly one audience", "invalid");
+  if (await opts.isRevoked(c.jti)) throw new TokenError("API key revoked", "revoked");
+  return { kind: "key", claims: { ...c, aud: Array.isArray(c.aud) ? c.aud[0]! : c.aud } };
+}
+
+/** A revoked key, as the pull endpoint and the `key.revoked` webhook report it. `exp` is unix seconds. */
+export interface RevokedKey {
+  jti: string;
+  sub: string;
+  exp: number;
+  revoked_at: string;
+}
+
+export interface RevocationSyncOptions {
+  /** Default: the first OPENRMS_ISSUER. */
+  issuer?: string;
+  /** This service's client-credentials id and secret (scope `accounts.keys`). */
+  clientId: string;
+  clientSecret: string;
+  /**
+   * Store newly revoked keys in your persisted denylist (idempotent: the same jti can arrive
+   * twice, from the webhook and the pull). Also the place to drop rows bound to those keys.
+   */
+  store: (keys: RevokedKey[]) => Promise<void>;
+  /** The newest `revoked_at` you have stored (ISO), or null when empty. Pulls overlap it by 5 minutes. */
+  lastSync: () => Promise<string | null>;
+  /** Pull interval in ms (default 5 minutes). */
+  intervalMs?: number;
+  /** Where failures go (default console.error). Sync failures never stop keys working (fail open). */
+  log?: (message: string, error?: unknown) => void;
+}
+
+/**
+ * Keeps a service's API-key denylist current (spec §5.5): `start()` pulls at once and every
+ * `intervalMs`; pass every verified webhook event to `ingest()` for the fast path.
+ */
+export class RevocationSync {
+  private timer: ReturnType<typeof setInterval> | undefined;
+  private token: { value: string; until: number } | undefined;
+  private readonly issuer: string;
+  private readonly log: (message: string, error?: unknown) => void;
+
+  constructor(private readonly opts: RevocationSyncOptions) {
+    const issuer = opts.issuer ?? defaultIssuers()[0];
+    if (!issuer) throw new Error("RevocationSync needs an issuer (OPENRMS_ISSUER)");
+    this.issuer = trim(issuer);
+    this.log = opts.log ?? ((m, e) => console.error(`[openrms keys] ${m}`, e ?? ""));
+  }
+
+  /** First pull, then the timer. Resolves even if the first pull fails (logged). */
+  async start(): Promise<void> {
+    await this.pull().catch((e) => this.log("revocation pull failed; keys keep working until it succeeds", e));
+    this.timer ??= setInterval(() => {
+      this.pull().catch((e) => this.log("revocation pull failed; keys keep working until it succeeds", e));
+    }, this.opts.intervalMs ?? 5 * 60_000);
+    (this.timer as { unref?: () => void }).unref?.();
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  /** Fetch revocations since the last stored one; returns how many were handed to `store`. */
+  async pull(): Promise<number> {
+    const last = await this.opts.lastSync();
+    const since = last ? new Date(new Date(last).getTime() - 5 * 60_000).toISOString() : "1970-01-01T00:00:00.000Z";
+    const res = await fetch(`${this.issuer}/api/v1/keys/revoked?since=${encodeURIComponent(since)}`, {
+      headers: { authorization: `Bearer ${await this.accessToken()}` },
+    });
+    if (res.status === 401) this.token = undefined;
+    if (!res.ok) throw new Error(`GET /api/v1/keys/revoked: HTTP ${res.status}`);
+    const body = (await res.json()) as { revoked: RevokedKey[] };
+    if (body.revoked.length) await this.opts.store(body.revoked);
+    return body.revoked.length;
+  }
+
+  /** Handle a verified webhook event. Returns true for `key.revoked` (stored), false for others. */
+  async ingest(event: AccountsEvent): Promise<boolean> {
+    if (event.type !== "key.revoked") return false;
+    const d = event.data as { jti?: string; sub?: string; exp?: number };
+    if (!d.jti || !d.sub || typeof d.exp !== "number") throw new Error("malformed key.revoked event");
+    await this.opts.store([{ jti: d.jti, sub: d.sub, exp: d.exp, revoked_at: event.createdAt }]);
+    return true;
+  }
+
+  private async accessToken(): Promise<string> {
+    if (this.token && this.token.until > Date.now() + 30_000) return this.token.value;
+    const disc = (await (await fetch(`${this.issuer}/.well-known/openid-configuration`)).json()) as { token_endpoint: string };
+    const res = await fetch(disc.token_endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        authorization: `Basic ${Buffer.from(`${encodeURIComponent(this.opts.clientId)}:${encodeURIComponent(this.opts.clientSecret)}`).toString("base64")}`,
+      },
+      body: new URLSearchParams({ grant_type: "client_credentials", resource: this.issuer, scope: "accounts.keys" }).toString(),
+    });
+    if (!res.ok) throw new Error(`client credentials: HTTP ${res.status} ${await res.text()}`);
+    const t = (await res.json()) as { access_token: string; expires_in?: number };
+    this.token = { value: t.access_token, until: Date.now() + (t.expires_in ?? 900) * 1000 };
+    return t.access_token;
   }
 }
 

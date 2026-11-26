@@ -31,6 +31,8 @@ export const webhookSubscriber = pgTable(
     secret: text().notNull(),
     active: boolean().notNull().default(true),
     createdAt: ts("created_at").notNull().defaultNow(),
+    /** The service audience this subscriber is, for events meant for one service (key.revoked). */
+    audience: text(),
   },
   (t) => [unique("webhook_subscriber_name_key").on(t.name)],
 );
@@ -59,5 +61,39 @@ export const eventDelivery = pgTable(
     foreignKey({ name: "event_delivery_event_id_fkey", columns: [t.eventId], foreignColumns: [eventOutbox.id] }).onDelete("cascade"),
     foreignKey({ name: "event_delivery_subscriber_id_fkey", columns: [t.subscriberId], foreignColumns: [webhookSubscriber.id] }).onDelete("cascade"),
     index("event_delivery_due").on(t.nextAt).where(sql`${t.deliveredAt} IS NULL`),
+  ],
+);
+
+/**
+ * API keys (identity.md §5). The key itself (a signed JWT) is shown once and never stored; this
+ * is what the owner's list, renewal and revocation need.
+ */
+export const apiKey = pgTable(
+  "api_key",
+  {
+    jti: text().primaryKey(),
+    sub: text().notNull(),
+    aud: text().notNull(),
+    scopes: text().array().notNull(),
+    name: text().notNull(),
+    createdAt: ts("created_at").notNull().defaultNow(),
+    expiresAt: ts("expires_at").notNull(),
+    /** Lifetime in days, kept for renewal. */
+    days: integer().notNull(),
+    renewable: boolean().notNull().default(false),
+    /** OAuth client that minted it (device flow), or null when made on the API keys page. */
+    clientId: text("client_id"),
+    replaces: text(),
+    replacedBy: text("replaced_by"),
+    lastUsedAt: ts("last_used_at"),
+    revokedAt: ts("revoked_at"),
+    /** revoked | revoke-all | renewed | banned | deleted */
+    revokeReason: text("revoke_reason"),
+    remindedDays: integer("reminded_days"),
+  },
+  (t) => [
+    index("api_key_sub").on(t.sub),
+    index("api_key_revoked").on(t.aud, t.revokedAt).where(sql`${t.revokedAt} IS NOT NULL`),
+    index("api_key_expiring").on(t.expiresAt).where(sql`${t.revokedAt} IS NULL`),
   ],
 );

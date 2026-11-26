@@ -24,6 +24,7 @@ import { migrate } from "./migrate.js";
 import { ROLE_NAMES, type RoleName } from "./rbac.js";
 import { audit } from "./routes/admin.js";
 import { hasSecondFactor } from "./staff.js";
+import { revokeAllKeys } from "./keys.js";
 
 type Kind = "public" | "confidential" | "service" | "first-party";
 
@@ -42,9 +43,12 @@ const atlasResources = () => env.resources.filter((r) => /\/\/atlas\.|:8787$/.te
 const rigsResources = () => env.resources.filter((r) => /\/\/rigs\.|:8790$/.test(r));
 const DEVICE = ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"];
 
+const SERVICE_SCOPES = ["accounts.read", "accounts.keys"];
+
 /** Spec §8. Redirect URIs for browser clients are added per deployment with add-client. */
 const SEED: ClientSpec[] = [
-  { id: "openrms-watch", name: "openRMS Watch", kind: "public", grants: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"], resources: atlasResources() },
+  // Watch also asks Accounts itself (resource = issuer, scope keys) to mint its Atlas key (spec §5.3).
+  { id: "openrms-watch", name: "openRMS Watch", kind: "public", grants: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"], resources: [...atlasResources(), env.ISSUER] },
   // Headless apps that act for a user at Rigs (spec §8).
   { id: "rigctlweb", name: "rigctlWeb", kind: "public", grants: DEVICE, resources: rigsResources() },
   { id: "hamstack", name: "hamstack", kind: "public", grants: DEVICE, resources: rigsResources() },
@@ -61,7 +65,7 @@ export async function registerClient(spec: ClientSpec): Promise<{ client_id: str
     ...(spec.redirectUris?.length ? { redirect_uris: spec.redirectUris, response_types: ["code"] as ["code"] } : {}),
     ...(isPublic ? { application_type: "native" as const, require_pkce: true } : {}),
     ...(spec.grants.includes("client_credentials")
-      ? { resources: [env.ISSUER, ...(spec.resources ?? [])], client_credentials_scopes: ["accounts.read"] }
+      ? { resources: [env.ISSUER, ...(spec.resources ?? [])], client_credentials_scopes: SERVICE_SCOPES }
       : spec.resources?.length ? { resources: spec.resources } : {}),
     // Only openRMS's own apps skip consent and get the staff `role` claim; a confidential
     // third-party web app is neither (spec §4).
@@ -100,7 +104,20 @@ async function seedClients() {
   for (const spec of SEED) {
     const { rowCount } = await q(`SELECT 1 FROM "oauthClient" WHERE "clientId" = $1`, [spec.id]);
     if (rowCount) {
-      console.log(`${spec.id}: exists`);
+      // Bring existing clients up to date: new resource links and service scopes.
+      for (const r of spec.resources ?? []) {
+        if ((await q(`SELECT 1 FROM "oauthResource" WHERE identifier = $1`, [r])).rowCount) {
+          await q(
+            `INSERT INTO "oauthClientResource" (id, "clientId", "resourceId", "createdAt") VALUES (gen_random_uuid()::text, $1, $2, now())
+             ON CONFLICT ("clientId", "resourceId") DO NOTHING`,
+            [spec.id, r],
+          );
+        }
+      }
+      if (spec.kind === "service") {
+        await q(`UPDATE "oauthClient" SET "clientCredentialsScopes" = $2::jsonb WHERE "clientId" = $1`, [spec.id, JSON.stringify(SERVICE_SCOPES)]);
+      }
+      console.log(`${spec.id}: exists (resources and scopes brought up to date)`);
       continue;
     }
     const r = await registerClient(spec);
@@ -152,6 +169,15 @@ switch (cmd) {
     await audit(null, "2fa.reset.cli", id, { totp: tf.rowCount, passkeys: pk.rowCount, sessions: ss.rowCount });
     await emit("user.updated", { sub: id });
     console.log(`${call}: 2FA off, ${pk.rowCount} passkey(s) removed, ${ss.rowCount} session(s) and every refresh token ended`);
+    // API keys survive (they're for machines), but a lost-factor case may mean a lost laptop too.
+    if (args.includes("--revoke-keys")) {
+      const k = await revokeAllKeys(id);
+      await audit(null, "key.revoke-all.cli", id, { count: k.length });
+      console.log(`${k.length} API key(s) revoked`);
+    } else {
+      const { rows: live } = await q<{ n: number }>(`SELECT count(*)::int AS n FROM api_key WHERE sub = $1 AND revoked_at IS NULL AND expires_at > now()`, [id]);
+      if (live[0]!.n) console.log(`${call} still has ${live[0]!.n} API key(s). Revoke all of them? Run: pnpm cli reset-2fa ${call} --revoke-keys (safe to repeat), or they can at ${env.UI_URL}/keys`);
+    }
     break;
   }
   case "set-callsign": {
@@ -211,6 +237,7 @@ switch (cmd) {
     await tx(async (c) => {
       const { rows: clubs } = await c.query<{ id: string }>(`SELECT "organizationId" AS id FROM member WHERE "userId" = $1`, [u.id]);
       for (const club of clubs) await emit("club.member_removed", { id: club.id, sub: u.id }, c);
+      await revokeAllKeys(u.id, "deleted", c);
       await emit("user.deleted", { sub: u.id, callsign: call }, c);
       await c.query(`DELETE FROM "user" WHERE id = $1`, [u.id]);
     });
@@ -311,18 +338,29 @@ switch (cmd) {
     break;
   }
   case "add-webhook": {
-    const [name, url] = args;
+    // AUDIENCE: the service this subscriber is (gets key.revoked for its keys); default: the URL's origin.
+    const [name, url, audience] = args;
     if (!name || !url) {
-      console.log("usage: add-webhook NAME URL");
+      console.log("usage: add-webhook NAME URL [AUDIENCE]");
       break;
     }
     const secret = randomBytes(32).toString("base64url");
     await q(
-      `INSERT INTO webhook_subscriber (name, url, secret) VALUES ($1, $2, $3)
-       ON CONFLICT (name) DO UPDATE SET url = EXCLUDED.url, secret = EXCLUDED.secret, active = true`,
-      [name, url, secret],
+      `INSERT INTO webhook_subscriber (name, url, secret, audience) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (name) DO UPDATE SET url = EXCLUDED.url, secret = EXCLUDED.secret, audience = EXCLUDED.audience, active = true`,
+      [name, url, secret, audience?.replace(/\/+$/, "") ?? null],
     );
     console.log(`${name} -> ${url}\nsigning secret (shown once): ${secret}`);
+    break;
+  }
+  case "set-webhook-audience": {
+    const [name, audience] = args;
+    if (!name) {
+      console.log("usage: set-webhook-audience NAME [AUDIENCE]   (no AUDIENCE: back to the URL's origin)");
+      break;
+    }
+    const r = await q(`UPDATE webhook_subscriber SET audience = $2 WHERE name = $1`, [name, audience?.replace(/\/+$/, "") ?? null]);
+    console.log(r.rowCount ? `${name}: audience ${audience ?? "(URL origin)"}` : "no such webhook");
     break;
   }
   case "rename-webhook": {
@@ -346,7 +384,7 @@ switch (cmd) {
     break;
   }
   default:
-    console.log("usage: pnpm cli set-role CALL ROLE | reset-2fa CALL | set-callsign OLD NEW | delete-user CALL [--force] | bootstrap CALL | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | rename-client OLD NEW | link-resource CLIENT URL | unlink-resource CLIENT URL | add-webhook NAME URL | rename-webhook OLD NEW [URL] | list-webhooks");
+    console.log("usage: pnpm cli set-role CALL ROLE | reset-2fa CALL [--revoke-keys] | set-callsign OLD NEW | delete-user CALL [--force] | bootstrap CALL | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | rename-client OLD NEW | link-resource CLIENT URL | unlink-resource CLIENT URL | add-webhook NAME URL [AUDIENCE] | set-webhook-audience NAME [AUDIENCE] | rename-webhook OLD NEW [URL] | list-webhooks");
 }
 if (cliSessionToken) await q(`DELETE FROM session WHERE token = $1`, [cliSessionToken]);
 await pool.end();

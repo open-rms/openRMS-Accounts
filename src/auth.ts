@@ -26,7 +26,9 @@ export async function withClientId<T>(id: string, fn: () => Promise<T>): Promise
 }
 
 // accounts.read: client-credentials scope for the service API (spec §6).
-export const SCOPES = ["openid", "profile", "email", "offline_access", "callsign", "clubs", "accounts.read"] as const;
+// keys: a device app may mint API keys within its client key policy (spec §5.3).
+// accounts.keys: client-credentials scope for the API key endpoints services call (spec §6).
+export const SCOPES = ["openid", "profile", "email", "offline_access", "callsign", "clubs", "keys", "accounts.read", "accounts.keys"] as const;
 
 // Admin endpoints that act on another account. Each is also guarded by rank, so an admin
 // cannot ban, edit or demote another admin or a superadmin.
@@ -115,10 +117,14 @@ const adminEvents = createAuthMiddleware(async (ctx) => {
   if (ctx.path !== "/admin/remove-user") await pool.query(`UPDATE "user" SET "updatedAt" = now() WHERE id = $1`, [userId]);
   if (ctx.path === "/admin/ban-user") {
     await revokeUserTokens(userId);
+    await (await import("./keys.js")).revokeAllKeys(userId, "banned");
     await emit("user.banned", { sub: userId });
   }
   else if (ctx.path === "/admin/unban-user") await emit("user.unbanned", { sub: userId });
-  else if (ctx.path === "/admin/remove-user") await emit("user.deleted", { sub: userId });
+  else if (ctx.path === "/admin/remove-user") {
+    await (await import("./keys.js")).revokeAllKeys(userId, "deleted");
+    await emit("user.deleted", { sub: userId });
+  }
   else if (ctx.path === "/admin/set-role" || ctx.path === "/admin/update-user") await emit("user.updated", { sub: userId });
 });
 
@@ -139,6 +145,16 @@ async function assertCallsignFree(callsign: string) {
   );
   if (rows.length) throw new APIError("BAD_REQUEST", { message: `an account or club for ${callsign} already exists` });
 }
+
+// Signing keys and JWKS for every token Accounts issues, and for API keys (src/keys.ts). The
+// signing key never rotates on a timer: API keys live up to a year, so a retired key would have
+// to stay published that long (spec §5.1).
+export const JWT_OPTIONS = {
+  jwt: { issuer: env.ISSUER, expirationTime: "15m" },
+  // Not used by first-party apps (they call /api/v1/token with an audience), but keep the
+  // session's JWT header off so tokens with aud=issuer don't leak into service calls.
+  disableSettingJwtHeader: true,
+};
 
 export const auth = betterAuth({
   appName: "openRMS",
@@ -225,12 +241,7 @@ export const auth = betterAuth({
   hooks: { before: rankGuard, after: adminEvents },
   plugins: [
     // Signing keys and JWKS for every token Accounts issues. The issuer is our origin.
-    jwt({
-      jwt: { issuer: env.ISSUER, expirationTime: "15m" },
-      // Not used by first-party apps (they call /api/v1/token with an audience), but keep the
-      // session's JWT header off so tokens with aud=issuer don't leak into service calls.
-      disableSettingJwtHeader: true,
-    }),
+    jwt(JWT_OPTIONS),
     oauthProvider({
       loginPage: `${env.UI_URL}/login`,
       consentPage: `${env.UI_URL}/consent`,
