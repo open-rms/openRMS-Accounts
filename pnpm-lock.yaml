@@ -206,6 +206,9 @@ importers:
       jose:
         specifier: ^6.2.18
         version: 6.2.18
+      nodemailer:
+        specifier: ^10.6.1
+        version: 10.6.1
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -216,12 +219,21 @@ importers:
       '@types/node':
         specifier: ^26.6.7
         version: 26.6.7
+      '@types/nodemailer':
+        specifier: ^8.0.2
+        version: 8.0.2
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      '@types/smtp-server':
+        specifier: ^3.5.13
+        version: 3.5.13
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+      smtp-server:
+        specifier: ^3.21.7
+        version: 3.21.7
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -939,8 +951,14 @@ packages:
   '@types/node@26.6.7':
     resolution: {integrity: sha512-tovuRfrUILu6v46bMG+BgXxMvsqPBx2WO2as8Rpln+JTff1dbexMtAM4KFTejmL0axsnSWViCW7MecUQpLuBRA==}
 
+  '@types/nodemailer@8.0.2':
+    resolution: {integrity: sha512-c7M5ox8p0nEOfbJ2E9Qcmt8/QCu/VzsiAhzBiZbvky2PhKZDHpKB3sQHBM5MEZNkCfBOaS6S9//AGPRTNB7IaA==}
+
   '@types/pg@8.23.1':
     resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
+
+  '@types/smtp-server@3.5.13':
+    resolution: {integrity: sha512-S3rGl2KbViH+98/CgHipPIWgtAFnjxLsppxIRbgJHNuZL7Y+py+7kZjT7xS+wOmCxYTn4O7IqLqkvekg99MDVQ==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -1399,6 +1417,10 @@ packages:
     resolution: {integrity: sha512-FixtE239Gl6Gz0ZGCK0WzvNwObNCIwVT+L7zQcf1QgcA6AzBxblzqe9OT88qiucNkhsjSOqiogSaF5jVbJiqSA==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
+  nodemailer@10.6.1:
+    resolution: {integrity: sha512-d7kfFfS/tR4Aca+SBvRaQ+MXKNv7d2JiRe5TxaRcFT/kYMh4GGPnW9aKksTIEvyEbA7d/7HYWE4YPDEHxzJj/g==}
+    engines: {node: '>=20.0.0'}
+
   obug@3.0.0:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
@@ -1464,6 +1486,10 @@ packages:
     resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
     engines: {node: '>=0.10.0'}
 
+  punycode.js@2.3.1:
+    resolution: {integrity: sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==}
+    engines: {node: '>=6'}
+
   resolve-pkg-maps@1.0.0:
     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==}
 
@@ -1477,6 +1503,10 @@ packages:
 
   set-cookie-parser@3.2.3:
     resolution: {integrity: sha512-bDO7NdAkLprNt3BNl3LAh0oVnOS5+WspzxOxiboo7vRIyTqj2pvFmNWYEFynSGQgpJ+7yG/9nc/aSG20UDBUpg==}
+
+  smtp-server@3.21.7:
+    resolution: {integrity: sha512-HZtF8LivEuPtcVuoCYHa60GTHohwPpwz90GHUwm88Xg2tI4ZJCHWTzuS08uufMkme4qvReqD7vEQSdyRGbRQ2Q==}
+    engines: {node: '>=20.0.0'}
 
   source-map-js@1.2.4:
     resolution: {integrity: sha512-J7ZjMvHd9O1fcT/5V09QWaaSl2BbWx3F6O08spde82Namf9UB0GxRVIPiNbVsdKkoizHiSpTodo3vp2bAy91MA==}
@@ -2034,11 +2064,20 @@ snapshots:
     dependencies:
       undici-types: 8.9.0
 
+  '@types/nodemailer@8.0.2':
+    dependencies:
+      '@types/node': 26.6.7
+
   '@types/pg@8.23.1':
     dependencies:
       '@types/node': 26.6.7
       pg-protocol: 1.16.1
       pg-types: 2.2.0
+
+  '@types/smtp-server@3.5.13':
+    dependencies:
+      '@types/node': 26.6.7
+      '@types/nodemailer': 8.0.2
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -2335,6 +2374,8 @@ snapshots:
 
   nanostores@1.5.5: {}
 
+  nodemailer@10.6.1: {}
+
   obug@3.0.0: {}
 
   pg-cloudflare@1.4.1:
@@ -2392,6 +2433,8 @@ snapshots:
     dependencies:
       xtend: 4.0.2
 
+  punycode.js@2.3.1: {}
+
   resolve-pkg-maps@1.0.0: {}
 
   rolldown@1.2.19:
@@ -2419,6 +2462,11 @@ snapshots:
   rou3@0.9.2: {}
 
   set-cookie-parser@3.2.3: {}
+
+  smtp-server@3.21.7:
+    dependencies:
+      nodemailer: 10.6.1
+      punycode.js: 2.3.1
 
   source-map-js@1.2.4: {}
 

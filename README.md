@@ -18,7 +18,7 @@ pnpm install
 pnpm build:ui          # the account pages (ui/)
 cp .env.example .env   # set BETTER_AUTH_SECRET (openssl rand -base64 32)
 pnpm dev               # http://localhost:8789
-pnpm cli seed-clients  # register the openRMS OAuth clients (needs one superadmin)
+pnpm cli bootstrap CALL   # first run: make your signed-up account superadmin and register the openRMS clients
 ACCOUNTS_E2E=1 pnpm test   # end-to-end tests against the running server
 ```
 
@@ -58,6 +58,16 @@ baseline automatically.
 Every default is local (`localhost`). A deployment sets its own public URLs in the
 environment: `BETTER_AUTH_URL` (the issuer), `TRUSTED_ORIGINS`, `APPS`, `FIRST_PARTY_AUDIENCES`,
 `RESOURCES` and `COOKIE_DOMAIN`. See `.env.example`.
+
+- `HOST` (default `127.0.0.1`): Accounts listens on loopback; put a reverse proxy or tunnel in
+  front for the public URL. Set `0.0.0.0` or `::` only if it must listen on every interface.
+- `SMTP_URL` and `MAIL_FROM`: password-reset and verification mail. Unset, mail is logged.
+  Cloudflare Email Sending: `smtps://api_token:<token>@smtp.mx.cloudflare.net:465`.
+
+Operator commands (`pnpm cli …`): `bootstrap CALL`, `set-role CALL ROLE`, `set-callsign OLD NEW`,
+`delete-user CALL [--force]` (emits `user.deleted`; staff can also use
+`POST /api/auth/admin/remove-user`), `seed-clients`, `add-client`, `list-clients`,
+`add-webhook NAME URL`, `list-webhooks`.
 
 ## License
 

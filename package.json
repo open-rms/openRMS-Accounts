@@ -27,13 +27,17 @@
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.22",
     "jose": "^6.2.18",
+    "nodemailer": "^10.6.1",
     "pg": "^8.23.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.7",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
+    "@types/smtp-server": "^3.5.13",
     "drizzle-kit": "^0.31.11",
+    "smtp-server": "^3.21.7",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.1"

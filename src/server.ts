@@ -6,4 +6,6 @@ import { migrate } from "./migrate.js";
 
 await migrate();
 startDispatcher();
-serve({ fetch: createApp().fetch, port: env.PORT }, (i) => console.log(`openRMS Accounts on http://localhost:${i.port} (issuer ${env.ISSUER})`));
+serve({ fetch: createApp().fetch, port: env.PORT, hostname: env.HOST }, (i) =>
+  console.log(`openRMS Accounts listening on ${i.address}:${i.port} (issuer ${env.ISSUER})`),
+);

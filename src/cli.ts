@@ -1,6 +1,8 @@
 // pnpm cli <command>
 //   set-role CALL superadmin|admin|moderator|user
 //   set-callsign OLD NEW              moderator callsign change (services re-check via user.updated)
+//   delete-user CALL [--force]        delete an account for good (emits user.deleted)
+//   bootstrap CALL                    first deploy: make CALL superadmin, then seed-clients
 //   seed-clients                      register the clients of spec §8 that don't exist yet
 //   add-client ID NAME public|confidential|service [redirectUri ...]
 //   list-clients
@@ -89,6 +91,23 @@ function saveDevSecret(clientId: string, secret: string) {
   writeFileSync(file, lines.join("\n") + "\n", { mode: 0o600 });
 }
 
+async function seedClients() {
+  for (const spec of SEED) {
+    const { rowCount } = await q(`SELECT 1 FROM "oauthClient" WHERE "clientId" = $1`, [spec.id]);
+    if (rowCount) {
+      console.log(`${spec.id}: exists`);
+      continue;
+    }
+    const r = await registerClient(spec);
+    if (r.client_secret && process.env.NODE_ENV !== "production") {
+      saveDevSecret(r.client_id, r.client_secret);
+      console.log(`${r.client_id}: created, secret saved to .dev-clients.env`);
+    } else {
+      console.log(`${r.client_id}: created${r.client_secret ? `, secret ${r.client_secret} (shown once; put it in that service's env)` : ""}`);
+    }
+  }
+}
+
 const [cmd, ...args] = process.argv.slice(2);
 await migrate();
 
@@ -134,21 +153,62 @@ switch (cmd) {
     console.log(moved ? `${oldC} is now ${newC} (unverified)` : "no such callsign");
     break;
   }
-  case "seed-clients": {
-    for (const spec of SEED) {
-      const { rowCount } = await q(`SELECT 1 FROM "oauthClient" WHERE "clientId" = $1`, [spec.id]);
-      if (rowCount) {
-        console.log(`${spec.id}: exists`);
-        continue;
-      }
-      const r = await registerClient(spec);
-      if (r.client_secret && process.env.NODE_ENV !== "production") {
-        saveDevSecret(r.client_id, r.client_secret);
-        console.log(`${r.client_id}: created, secret saved to .dev-clients.env`);
-      } else {
-        console.log(`${r.client_id}: created${r.client_secret ? `, secret ${r.client_secret} (shown once; put it in that service's env)` : ""}`);
-      }
+  case "delete-user": {
+    // Permanent. Sessions, logins, tokens, consents and memberships go with the row (FK cascade).
+    // Services drop their own data on user.deleted. Staff can also use POST /api/auth/admin/remove-user.
+    const call = normalizeCallsign(args[0] ?? "");
+    const force = args.includes("--force");
+    if (!call) {
+      console.log("usage: delete-user CALLSIGN [--force]");
+      break;
     }
+    const { rows: [u] } = await q<{ id: string; role: string | null }>(`SELECT id, role FROM "user" WHERE callsign = $1`, [call]);
+    if (!u) {
+      console.log("no such callsign");
+      break;
+    }
+    const { rows: soleOwner } = await q<{ callsign: string }>(
+      `SELECT o.callsign FROM member m JOIN organization o ON o.id = m."organizationId"
+        WHERE m."userId" = $1 AND m.role LIKE '%owner%'
+          AND (SELECT count(*) FROM member m2 WHERE m2."organizationId" = o.id AND m2.role LIKE '%owner%') = 1`,
+      [u.id],
+    );
+    if (soleOwner.length && !force) {
+      console.log(`${call} is the only owner of ${soleOwner.map((r) => r.callsign).join(", ")}. Make someone else owner first, or add --force (the club stays, without an owner).`);
+      break;
+    }
+    if (/superadmin/.test(u.role ?? "") && !force) {
+      console.log(`${call} is a superadmin; add --force to delete it anyway.`);
+      break;
+    }
+    await tx(async (c) => {
+      const { rows: clubs } = await c.query<{ id: string }>(`SELECT "organizationId" AS id FROM member WHERE "userId" = $1`, [u.id]);
+      for (const club of clubs) await emit("club.member_removed", { id: club.id, sub: u.id }, c);
+      await emit("user.deleted", { sub: u.id, callsign: call }, c);
+      await c.query(`DELETE FROM "user" WHERE id = $1`, [u.id]);
+    });
+    await audit(null, "user.delete.cli", u.id, { callsign: call, force });
+    console.log(`${call} deleted`);
+    break;
+  }
+  case "bootstrap": {
+    // A fresh deployment: make the first account (signed up on the site) superadmin, then
+    // register the openRMS clients. Safe to run again.
+    const call = normalizeCallsign(args[0] ?? "");
+    const { rows: [u] } = await q<{ id: string }>(`SELECT id FROM "user" WHERE callsign = $1`, [call]);
+    if (!u) {
+      console.log("usage: bootstrap CALLSIGN  (sign up with that callsign on the site first)");
+      break;
+    }
+    await q(`UPDATE "user" SET role = 'superadmin', "updatedAt" = now() WHERE id = $1`, [u.id]);
+    await audit(null, "role.set.cli", u.id, "superadmin (bootstrap)");
+    await emit("user.updated", { sub: u.id });
+    console.log(`${call} is superadmin`);
+    await seedClients();
+    break;
+  }
+  case "seed-clients": {
+    await seedClients();
     break;
   }
   case "add-client": {
@@ -197,7 +257,7 @@ switch (cmd) {
     break;
   }
   default:
-    console.log("usage: pnpm cli set-role CALL ROLE | set-callsign OLD NEW | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | add-webhook NAME URL | list-webhooks");
+    console.log("usage: pnpm cli set-role CALL ROLE | set-callsign OLD NEW | delete-user CALL [--force] | bootstrap CALL | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | add-webhook NAME URL | list-webhooks");
 }
 if (cliSessionToken) await q(`DELETE FROM session WHERE token = $1`, [cliSessionToken]);
 await pool.end();

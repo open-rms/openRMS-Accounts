@@ -5,6 +5,8 @@ const list = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 const schema = z.object({
   DATABASE_URL: z.string().default("postgres://openrms:openrms@127.0.0.1:5442/openrms_accounts"),
   PORT: z.coerce.number().default(8789),
+  /** Interface to listen on. Loopback by default: put a reverse proxy or tunnel in front. "0.0.0.0" or "::" for all. */
+  HOST: z.string().default("127.0.0.1"),
   /** Public origin of Accounts. Also the OIDC issuer (spec §1). */
   BETTER_AUTH_URL: z.string().default("http://localhost:8789"),
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
