@@ -7,7 +7,7 @@ export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
   dbCredentials: { url: process.env.DATABASE_URL ?? "postgres://openrms:openrms@127.0.0.1:5442/openrms_accounts" },
-  tablesFilter: ["audit_log", "webhook_subscriber", "event_outbox", "event_delivery", "api_key", "profile"],
+  tablesFilter: ["audit_log", "webhook_subscriber", "event_outbox", "event_delivery", "api_key", "profile", "user_radio"],
   strict: true,
   verbose: true,
 });

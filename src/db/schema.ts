@@ -117,3 +117,23 @@ export const profile = pgTable("profile", {
   avatarUrl: text("avatar_url"),
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
+
+/**
+ * "My radios" (identity.md §4, §6): the user's radios, keyed to the Rigs/Hamlib catalog by
+ * the model macro (RIG_MODEL_FTDX10), with the Hamlib number as a fallback should a macro be
+ * renamed. The label is the user's own (one macro can cover several products).
+ */
+export const userRadio = pgTable(
+  "user_radio",
+  {
+    id: text().primaryKey().default(sql`gen_random_uuid()::text`),
+    sub: text().notNull(),
+    model: text().notNull(),
+    hamlibModel: integer("hamlib_model"),
+    label: text().notNull(),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("user_radio_sub").on(t.sub, t.sortOrder)],
+);

@@ -10,6 +10,7 @@
   import * as Table from "#lib/components/ui/table/index.ts";
   import SecurityCard from "#lib/SecurityCard.svelte";
   import ProfileCard from "#lib/ProfileCard.svelte";
+  import RadiosCard from "#lib/RadiosCard.svelte";
 
   $effect(() => {
     if (!$session.isPending && !$session.data?.user) goto("/login?next=/account");
@@ -87,6 +88,8 @@
   </Card.Root>
 
   <ProfileCard {user} />
+
+  <RadiosCard />
 
   <Card.Root class="mb-5">
     <Card.Header><Card.Title><h2 class="m-0">Password</h2></Card.Title></Card.Header>

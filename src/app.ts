@@ -11,6 +11,7 @@ import { env } from "./env.js";
 import { adminRoutes } from "./routes/admin.js";
 import { keyRoutes, meKeyRoutes, userKeyRoutes } from "./routes/keys.js";
 import { meRoutes } from "./routes/me.js";
+import { meRadioRoutes } from "./routes/radios.js";
 import { avatarRoutes, meProfileRoutes, profileRoutes } from "./routes/profile.js";
 import { serviceRoutes } from "./routes/service.js";
 import { tokenRoutes } from "./routes/token.js";
@@ -62,6 +63,7 @@ export function createApp() {
   app.route("/api/v1/token", tokenRoutes);
   app.route("/api/v1/me/keys", meKeyRoutes);
   app.route("/api/v1/me/profile", meProfileRoutes);
+  app.route("/api/v1/me/radios", meRadioRoutes);
   app.route("/api/v1/profiles", profileRoutes);
   app.route("/api/v1/avatars", avatarRoutes);
   app.route("/api/v1/me", meRoutes);
@@ -70,7 +72,9 @@ export function createApp() {
   app.route("/api/v1/admin", adminRoutes);
   app.route("/api/v1", serviceRoutes);
 
-  app.get("/api/v1/ui/config", (c) => c.json({ issuer: env.ISSUER, apps: env.apps }));
+  // rigsCatalog: the Rigs model search the radio picker uses (CORS open, spec §4 radios).
+  const rigsApi = env.resources.find((r) => /\/\/rigs\.|:8790$/.test(r));
+  app.get("/api/v1/ui/config", (c) => c.json({ issuer: env.ISSUER, apps: env.apps, rigsCatalog: rigsApi ? `${rigsApi}/api/v1/rigs` : null }));
   app.get("/healthz", (c) => c.json({ ok: true }));
   app.get("/api/v1", (c) => c.json({
     name: "openRMS Accounts",

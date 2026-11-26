@@ -9,6 +9,7 @@ import { env } from "../env.js";
 import { normalizeCallsign } from "../lib/callsign.js";
 import { effectiveRole } from "../staff.js";
 import { loadProfile } from "../profile.js";
+import { radiosOf } from "../radios.js";
 
 type Vars = { Variables: { clientId: string } };
 export const serviceRoutes = new Hono<Vars>();
@@ -55,10 +56,17 @@ const publicUser = async (id: string) => {
   return {
     sub: u.id, name: u.name, callsign: u.callsign, callsign_verified: !!u.callsignVerified, callsign_verified_method: u.callsignVerifiedMethod,
     grid: u.gridsquare, role: await effectiveRole(u.id, u.role), banned: !!u.banned, clubs: await clubsOf(u.id),
+    radios: (await radiosOf(u.id)).map(({ id: _id, ...r }) => r),
     // Full values above are for server-side use; show other people only what this allows (spec §4a).
     visibility: await (async () => { const p = await loadProfile(u.id); return { ...p.visibility, hidden: p.hidden }; })(),
   };
 };
+
+serviceRoutes.get("/users/:sub/radios", async (c) => {
+  const { rows } = await q(`SELECT 1 FROM "user" WHERE id = $1`, [c.req.param("sub")]);
+  if (!rows[0]) return c.json({ error: "not found" }, 404);
+  return c.json((await radiosOf(c.req.param("sub"))).map(({ id: _id, ...r }) => r));
+});
 
 serviceRoutes.get("/users/:sub", async (c) => {
   const u = await publicUser(c.req.param("sub"));

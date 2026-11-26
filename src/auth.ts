@@ -28,7 +28,8 @@ export async function withClientId<T>(id: string, fn: () => Promise<T>): Promise
 // accounts.read: client-credentials scope for the service API (spec §6).
 // keys: a device app may mint API keys within its client key policy (spec §5.3).
 // accounts.keys: client-credentials scope for the API key endpoints services call (spec §6).
-export const SCOPES = ["openid", "profile", "email", "offline_access", "callsign", "clubs", "keys", "accounts.read", "accounts.keys"] as const;
+// radios: the user's radios as Hamlib macros (spec §4); first-party tokens carry it by default.
+export const SCOPES = ["openid", "profile", "email", "offline_access", "callsign", "clubs", "radios", "keys", "accounts.read", "accounts.keys"] as const;
 
 // Admin endpoints that act on another account. Each is also guarded by rank, so an admin
 // cannot ban, edit or demote another admin or a superadmin.

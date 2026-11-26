@@ -38,6 +38,9 @@ export async function migrate() {
   await pool.query(`DO $$ BEGIN
     ALTER TABLE profile ADD CONSTRAINT profile_sub_fkey FOREIGN KEY (sub) REFERENCES "user"(id) ON DELETE CASCADE;
   EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+  await pool.query(`DO $$ BEGIN
+    ALTER TABLE user_radio ADD CONSTRAINT user_radio_sub_fkey FOREIGN KEY (sub) REFERENCES "user"(id) ON DELETE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

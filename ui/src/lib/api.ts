@@ -26,7 +26,8 @@ export interface PublicProfile {
   sub: string; callsign: string; callsign_verified: boolean; name?: string; grid?: string; city?: string; bio?: string; links?: ProfileLink[];
   picture?: string; self?: boolean; visibility?: Record<ProfileField, Level>; hidden?: boolean;
 }
-export interface UiConfig { issuer: string; apps: { origin: string; name: string }[] }
+export interface UiConfig { issuer: string; apps: { origin: string; name: string }[]; rigsCatalog?: string | null }
+export interface Radio { id: string; model: string; hamlib_model: number | null; label: string; primary: boolean }
 
 async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -41,6 +42,10 @@ async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   config: () => send<UiConfig>("/api/v1/ui/config"),
   me: () => send<Me>("/api/v1/me"),
+  radios: () => send<{ radios: Radio[]; max: number }>("/api/v1/me/radios"),
+  addRadio: (r: { model: string; hamlib_model: number | null; label: string }) => send<{ radios: Radio[] }>("/api/v1/me/radios", { method: "POST", body: JSON.stringify(r) }),
+  updateRadio: (id: string, r: { label?: string; primary?: true }) => send<{ radios: Radio[] }>(`/api/v1/me/radios/${id}`, { method: "PATCH", body: JSON.stringify(r) }),
+  removeRadio: (id: string) => send<void>(`/api/v1/me/radios/${id}`, { method: "DELETE" }),
   myProfile: () => send<MyProfile>("/api/v1/me/profile"),
   saveProfile: (p: Partial<MyProfile> & { avatar?: { source: AvatarSource; url?: string | null } }) => send<MyProfile>("/api/v1/me/profile", { method: "PUT", body: JSON.stringify(p) }),
   profile: (id: string, as?: "public" | "members") => send<PublicProfile>(`/api/v1/profiles/${encodeURIComponent(id)}${as ? `?as=${as}` : ""}`),

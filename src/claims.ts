@@ -2,6 +2,7 @@
 import { q } from "./db/pool.js";
 import { effectiveRole } from "./staff.js";
 import { loadProfile, pictureFor, thirdPartyProfile } from "./profile.js";
+import { radiosClaim } from "./radios.js";
 
 export interface UserRow {
   id: string;
@@ -56,9 +57,10 @@ export async function buildClaims(user: Pick<UserRow, "id"> & Partial<UserRow>, 
     Object.assign(out, { callsign: u.callsign, callsign_verified: !!u.callsignVerified, callsign_verified_method: u.callsignVerifiedMethod ?? null });
   }
   if (has("clubs")) out.clubs = await clubsOf(u.id);
+  if (has("radios")) out.radios = await radiosClaim(u.id);
   if (firstParty) out.role = await effectiveRole(u.id, u.role);
   return out;
 }
 
 /** Scopes that every first-party token carries. */
-export const FIRST_PARTY_SCOPES = ["openid", "profile", "email", "callsign", "clubs"] as const;
+export const FIRST_PARTY_SCOPES = ["openid", "profile", "email", "callsign", "clubs", "radios"] as const;

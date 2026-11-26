@@ -31,6 +31,10 @@ export interface AccessClaims {
   callsign_verified?: boolean;
   callsign_verified_method?: string | null;
   clubs?: ClubClaim[];
+  /** Scope `radios`: Hamlib model macros of the user's radios, primary first, at most 20. */
+  radios?: string[];
+  /** Scope `profile`: the avatar proxy URL, only when the picture is public. */
+  picture?: string;
   /** First-party tokens only. */
   role?: StaffRole;
 }
