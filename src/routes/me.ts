@@ -10,6 +10,7 @@ import { normalizeCallsign } from "../lib/callsign.js";
 import { permissionsOf, roleOf } from "../rbac.js";
 import { effectiveRole, staffNeedsSecondFactor } from "../staff.js";
 import { requireSession, type SessionVars } from "./session.js";
+import { pendingDeletion } from "../deletion.js";
 
 export const meRoutes = new Hono<SessionVars>();
 
@@ -32,6 +33,8 @@ meRoutes.get("/", async (c) => {
     staffNeedsSecondFactor: await staffNeedsSecondFactor(u.id, u.role),
     /** The role held, whether or not it can be used yet. */
     storedRole: roleOf(u.role),
+    /** When a self-service deletion will happen, if one is pending (spec §4c). */
+    pendingDeletion: await pendingDeletion(u.id),
     clubs: await clubsOf(u.id),
   });
 });

@@ -65,6 +65,7 @@
 
 <div class="mx-auto max-w-[400px]">
   <h1>Sign in</h1>
+  {#if page.url.searchParams.has("deleted")}<p class="rounded border p-3">Your account will be deleted. We've emailed you a link in case you change your mind.</p>{/if}
   {#if returningTo}<p class="text-muted-foreground">to continue to <b>{returningTo}</b></p>{/if}
   <form onsubmit={submit}>
     <Card.Root>

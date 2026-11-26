@@ -36,6 +36,13 @@
       "when": 1795733119639,
       "tag": "0004_radios",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795733376120,
+      "tag": "0005_account_deletion",
+      "breakpoints": true
     }
   ]
 }

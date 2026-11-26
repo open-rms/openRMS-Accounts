@@ -82,6 +82,10 @@ from `GET /api/v1/keys/revoked`. Key scopes come from each service's
 `/.well-known/oauth-protected-resource` (`openrms_key_scopes`), with the spec's lists built in
 until a service publishes them.
 
+Account export and deletion (spec §4c): people download their data from the account page and
+can delete their account themselves; it is deleted after 7 days (a job checks every 15 minutes)
+unless they cancel by signing in or with the emailed link.
+
 Operator commands (`pnpm cli …`): `bootstrap CALL`, `set-role CALL ROLE`, `set-callsign OLD NEW`,
 `reset-2fa CALL [--revoke-keys]` (every factor lost: removes TOTP and passkeys, ends sessions; confirm who is asking first),
 `delete-user CALL [--force]` (emits `user.deleted`; staff can also use

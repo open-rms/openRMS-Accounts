@@ -25,6 +25,7 @@ import { ROLE_NAMES, type RoleName } from "./rbac.js";
 import { audit } from "./routes/admin.js";
 import { hasSecondFactor } from "./staff.js";
 import { revokeAllKeys } from "./keys.js";
+import { deleteAccount, soleOwnerOf } from "./deletion.js";
 
 type Kind = "public" | "confidential" | "service" | "first-party";
 
@@ -220,28 +221,16 @@ switch (cmd) {
       console.log("no such callsign");
       break;
     }
-    const { rows: soleOwner } = await q<{ callsign: string }>(
-      `SELECT o.callsign FROM member m JOIN organization o ON o.id = m."organizationId"
-        WHERE m."userId" = $1 AND m.role LIKE '%owner%'
-          AND (SELECT count(*) FROM member m2 WHERE m2."organizationId" = o.id AND m2.role LIKE '%owner%') = 1`,
-      [u.id],
-    );
+    const soleOwner = await soleOwnerOf(u.id);
     if (soleOwner.length && !force) {
-      console.log(`${call} is the only owner of ${soleOwner.map((r) => r.callsign).join(", ")}. Make someone else owner first, or add --force (the club stays, without an owner).`);
+      console.log(`${call} is the only owner of ${soleOwner.join(", ")}. Make someone else owner first, or add --force (the club stays, without an owner).`);
       break;
     }
     if (/superadmin/.test(u.role ?? "") && !force) {
       console.log(`${call} is a superadmin; add --force to delete it anyway.`);
       break;
     }
-    await tx(async (c) => {
-      const { rows: clubs } = await c.query<{ id: string }>(`SELECT "organizationId" AS id FROM member WHERE "userId" = $1`, [u.id]);
-      for (const club of clubs) await emit("club.member_removed", { id: club.id, sub: u.id }, c);
-      await revokeAllKeys(u.id, "deleted", c);
-      await emit("user.deleted", { sub: u.id, callsign: call }, c);
-      await c.query(`DELETE FROM "user" WHERE id = $1`, [u.id]);
-    });
-    await audit(null, "user.delete.cli", u.id, { callsign: call, force });
+    await deleteAccount(u.id, null, force ? "cli --force" : "cli");
     console.log(`${call} deleted`);
     break;
   }

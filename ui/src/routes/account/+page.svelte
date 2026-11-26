@@ -11,6 +11,7 @@
   import SecurityCard from "#lib/SecurityCard.svelte";
   import ProfileCard from "#lib/ProfileCard.svelte";
   import RadiosCard from "#lib/RadiosCard.svelte";
+  import AccountDataCard from "#lib/AccountDataCard.svelte";
 
   $effect(() => {
     if (!$session.isPending && !$session.data?.user) goto("/login?next=/account");
@@ -160,4 +161,6 @@
       {/if}
     </Card.Content>
   </Card.Root>
+
+  <AccountDataCard callsign={user.callsign} />
 {/if}

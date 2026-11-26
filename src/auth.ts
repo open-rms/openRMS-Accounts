@@ -125,6 +125,7 @@ const adminEvents = createAuthMiddleware(async (ctx) => {
   else if (ctx.path === "/admin/remove-user") {
     await (await import("./keys.js")).revokeAllKeys(userId, "deleted");
     await emit("user.deleted", { sub: userId });
+    await pool.query(`DELETE FROM account_deletion WHERE sub = $1`, [userId]);
   }
   else if (ctx.path === "/admin/set-role" || ctx.path === "/admin/update-user") await emit("user.updated", { sub: userId });
 });

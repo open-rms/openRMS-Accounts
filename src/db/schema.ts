@@ -137,3 +137,12 @@ export const userRadio = pgTable(
   },
   (t) => [index("user_radio_sub").on(t.sub, t.sortOrder)],
 );
+
+/** Self-service deletions waiting out their grace period (identity.md §4c). */
+export const accountDeletion = pgTable("account_deletion", {
+  sub: text().primaryKey(),
+  requestedAt: ts("requested_at").notNull().defaultNow(),
+  deleteAfter: ts("delete_after").notNull(),
+  /** sha256 of the emailed cancel link's token. */
+  cancelTokenHash: text("cancel_token_hash").notNull(),
+});
