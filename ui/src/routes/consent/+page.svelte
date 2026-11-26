@@ -11,7 +11,8 @@
   const scopes = (page.url.searchParams.get("scope") ?? "").split(" ").filter(Boolean);
   const SCOPE_TEXT: Record<string, string> = {
     openid: "Know which openRMS account you are",
-    profile: "Your name and home grid",
+    profile: "Your name and home grid, as you share them in your profile settings",
+    keys: "Make API keys for this app (only the kinds it is allowed)",
     email: "Your email address",
     callsign: "Your callsign and whether it's verified",
     clubs: "The clubs and extra callsigns you belong to",

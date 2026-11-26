@@ -97,3 +97,20 @@ export const apiKey = pgTable(
     index("api_key_expiring").on(t.expiresAt).where(sql`${t.revokedAt} IS NULL`),
   ],
 );
+
+/**
+ * Profile fields beyond name and grid, and who may see each field (identity.md §4a). Name and
+ * grid live on Better Auth's user row; their visibility lives here. Written only through
+ * PUT /api/v1/me/profile, never through Better Auth's updateUser.
+ */
+export const profile = pgTable("profile", {
+  sub: text().primaryKey(),
+  bio: text(),
+  city: text(),
+  /** [{kind: "qrz" | "website" | "other", url}] */
+  links: jsonb().notNull().default(sql`'[]'::jsonb`),
+  /** {name, grid, city, bio, links, avatar}: "public" | "members" | "private"; missing = default. */
+  visibility: jsonb().notNull().default(sql`'{}'::jsonb`),
+  hidden: boolean().notNull().default(false),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});

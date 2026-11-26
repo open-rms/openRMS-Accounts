@@ -8,6 +8,7 @@ import { q } from "../db/pool.js";
 import { env } from "../env.js";
 import { normalizeCallsign } from "../lib/callsign.js";
 import { effectiveRole } from "../staff.js";
+import { loadProfile } from "../profile.js";
 
 type Vars = { Variables: { clientId: string } };
 export const serviceRoutes = new Hono<Vars>();
@@ -54,6 +55,8 @@ const publicUser = async (id: string) => {
   return {
     sub: u.id, name: u.name, callsign: u.callsign, callsign_verified: !!u.callsignVerified, callsign_verified_method: u.callsignVerifiedMethod,
     grid: u.gridsquare, role: await effectiveRole(u.id, u.role), banned: !!u.banned, clubs: await clubsOf(u.id),
+    // Full values above are for server-side use; show other people only what this allows (spec §4a).
+    visibility: await (async () => { const p = await loadProfile(u.id); return { ...p.visibility, hidden: p.hidden }; })(),
   };
 };
 

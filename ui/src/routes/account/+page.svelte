@@ -9,6 +9,7 @@
   import * as Card from "#lib/components/ui/card/index.ts";
   import * as Table from "#lib/components/ui/table/index.ts";
   import SecurityCard from "#lib/SecurityCard.svelte";
+  import ProfileCard from "#lib/ProfileCard.svelte";
 
   $effect(() => {
     if (!$session.isPending && !$session.data?.user) goto("/login?next=/account");
@@ -16,24 +17,6 @@
 
   type U = { id: string; name: string; email: string; callsign: string; callsignVerified?: boolean | null; callsignVerifiedMethod?: string | null; gridsquare?: string | null };
   let user = $derived($session.data?.user as U | undefined);
-
-  // Profile
-  let name = $state(""), grid = $state(""), profileMsg = $state(""), profileErr = $state("");
-  let loadedFor = "";
-  $effect(() => {
-    if (user && loadedFor !== user.id) {
-      loadedFor = user.id;
-      name = user.name;
-      grid = user.gridsquare ?? "";
-    }
-  });
-  async function saveProfile(e: Event) {
-    e.preventDefault();
-    profileMsg = profileErr = "";
-    const { error } = await authClient.updateUser({ name, gridsquare: grid.trim() || null } as never);
-    if (error) profileErr = error.message ?? "Save failed";
-    else profileMsg = "Saved. Apps see the change on their next token (within 15 minutes).";
-  }
 
   // Password
   let current = $state(""), next = $state(""), pwMsg = $state(""), pwErr = $state(""), liveKeys = $state(0);
@@ -103,19 +86,7 @@
     </Card.Content>
   </Card.Root>
 
-  <Card.Root class="mb-5">
-    <Card.Header><Card.Title><h2 class="m-0">Profile</h2></Card.Title></Card.Header>
-    <Card.Content>
-      <form class="grid max-w-[420px] gap-3" onsubmit={saveProfile}>
-        <div class="grid gap-1.5"><Label for="n">Name</Label><Input id="n" required bind:value={name} /></div>
-        <div class="grid gap-1.5"><Label for="g">Home grid</Label><Input id="g" placeholder="DN16" bind:value={grid} /></div>
-        <div class="grid gap-1.5"><Label>Email</Label><span>{user.email}</span></div>
-        {#if profileErr}<p class="text-destructive m-0">{profileErr}</p>{/if}
-        {#if profileMsg}<p class="m-0">{profileMsg}</p>{/if}
-        <div><Button type="submit">Save</Button></div>
-      </form>
-    </Card.Content>
-  </Card.Root>
+  <ProfileCard {user} />
 
   <Card.Root class="mb-5">
     <Card.Header><Card.Title><h2 class="m-0">Password</h2></Card.Title></Card.Header>

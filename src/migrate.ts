@@ -34,6 +34,10 @@ export async function migrate() {
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS organization_callsign_unique ON organization (callsign)`);
   await adoptBaseline();
   await drizzleMigrate(drizzle(pool), { migrationsFolder });
+  // Drizzle doesn't know Better Auth's user table: tie profile rows to their account here.
+  await pool.query(`DO $$ BEGIN
+    ALTER TABLE profile ADD CONSTRAINT profile_sub_fkey FOREIGN KEY (sub) REFERENCES "user"(id) ON DELETE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

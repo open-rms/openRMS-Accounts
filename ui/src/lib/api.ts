@@ -14,6 +14,14 @@ export interface ApiKey {
   revoked_at: string | null; revoke_reason: string | null; renewable: boolean; client_id: string | null; replaces: string | null; replaced_by: string | null;
 }
 export interface KeyService { aud: string; name: string; scopes: { scope: string; description: string }[] }
+export type Level = "public" | "members" | "private";
+export type ProfileField = "name" | "grid" | "city" | "bio" | "links" | "avatar";
+export interface ProfileLink { kind: "qrz" | "website" | "other"; url: string }
+export interface MyProfile { bio: string | null; city: string | null; links: ProfileLink[]; visibility: Record<ProfileField, Level>; hidden: boolean }
+export interface PublicProfile {
+  sub: string; callsign: string; callsign_verified: boolean; name?: string; grid?: string; city?: string; bio?: string; links?: ProfileLink[];
+  picture?: string; self?: boolean; visibility?: Record<ProfileField, Level>; hidden?: boolean;
+}
 export interface UiConfig { issuer: string; apps: { origin: string; name: string }[] }
 
 async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -29,6 +37,9 @@ async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   config: () => send<UiConfig>("/api/v1/ui/config"),
   me: () => send<Me>("/api/v1/me"),
+  myProfile: () => send<MyProfile>("/api/v1/me/profile"),
+  saveProfile: (p: Partial<MyProfile>) => send<MyProfile>("/api/v1/me/profile", { method: "PUT", body: JSON.stringify(p) }),
+  profile: (id: string, as?: "public" | "members") => send<PublicProfile>(`/api/v1/profiles/${encodeURIComponent(id)}${as ? `?as=${as}` : ""}`),
   keys: () => send<{ keys: ApiKey[]; services: KeyService[]; canCreate: boolean; defaultDays: number; maxDays: number }>("/api/v1/me/keys"),
   createKey: (k: { aud: string; scopes: string[]; name: string; days: number }) => send<ApiKey & { key: string }>("/api/v1/me/keys", { method: "POST", body: JSON.stringify(k) }),
   revokeKey: (jti: string) => send<void>(`/api/v1/me/keys/${encodeURIComponent(jti)}`, { method: "DELETE" }),
