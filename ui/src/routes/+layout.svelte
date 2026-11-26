@@ -13,6 +13,7 @@
   const nav = [
     { href: "/account", label: "Account" },
     { href: "/clubs", label: "Clubs" },
+    { href: "/keys", label: "API keys" },
   ];
 </script>
 

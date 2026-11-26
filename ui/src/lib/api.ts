@@ -9,6 +9,11 @@ export interface Me {
   staffNeedsSecondFactor?: boolean;
   storedRole?: string;
 }
+export interface ApiKey {
+  jti: string; aud: string; scopes: string[]; name: string; created_at: string; expires_at: string; last_used_at: string | null;
+  revoked_at: string | null; revoke_reason: string | null; renewable: boolean; client_id: string | null; replaces: string | null; replaced_by: string | null;
+}
+export interface KeyService { aud: string; name: string; scopes: { scope: string; description: string }[] }
 export interface UiConfig { issuer: string; apps: { origin: string; name: string }[] }
 
 async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -24,6 +29,10 @@ async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   config: () => send<UiConfig>("/api/v1/ui/config"),
   me: () => send<Me>("/api/v1/me"),
+  keys: () => send<{ keys: ApiKey[]; services: KeyService[]; canCreate: boolean; defaultDays: number; maxDays: number }>("/api/v1/me/keys"),
+  createKey: (k: { aud: string; scopes: string[]; name: string; days: number }) => send<ApiKey & { key: string }>("/api/v1/me/keys", { method: "POST", body: JSON.stringify(k) }),
+  revokeKey: (jti: string) => send<void>(`/api/v1/me/keys/${encodeURIComponent(jti)}`, { method: "DELETE" }),
+  revokeAllKeys: () => send<{ revoked: number }>("/api/v1/me/keys/revoke-all", { method: "POST", body: "{}" }),
   clubs: () => send<{ clubs: Club[] }>("/api/v1/me/clubs"),
   createClub: (callsign: string, name: string) => send<{ id: string }>("/api/v1/me/clubs", { method: "POST", body: JSON.stringify({ callsign, name }) }),
   addClubMember: (id: string, callsign: string, role: string) =>

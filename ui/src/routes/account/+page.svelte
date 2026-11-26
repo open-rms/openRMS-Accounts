@@ -36,7 +36,12 @@
   }
 
   // Password
-  let current = $state(""), next = $state(""), pwMsg = $state(""), pwErr = $state("");
+  let current = $state(""), next = $state(""), pwMsg = $state(""), pwErr = $state(""), liveKeys = $state(0);
+  async function revokeAllKeys() {
+    const { revoked } = await api.revokeAllKeys();
+    pwMsg = `Password changed, and ${revoked} API key${revoked === 1 ? "" : "s"} revoked.`;
+    liveKeys = 0;
+  }
   async function changePassword(e: Event) {
     e.preventDefault();
     pwMsg = pwErr = "";
@@ -46,6 +51,9 @@
       pwMsg = "Password changed. Other sessions and linked devices are signed out.";
       current = next = "";
       loadSessions();
+      // API keys survive a password change (they're for machines); offer to end them (spec §5.3).
+      const { keys } = await api.keys().catch(() => ({ keys: [] as { revoked_at: string | null }[] }));
+      liveKeys = keys.filter((k) => !k.revoked_at).length;
     }
   }
 
@@ -117,6 +125,13 @@
         <div class="grid gap-1.5"><Label for="np">New password (10+ characters)</Label><Input id="np" type="password" minlength={10} required autocomplete="new-password" bind:value={next} /></div>
         {#if pwErr}<p class="text-destructive m-0">{pwErr}</p>{/if}
         {#if pwMsg}<p class="m-0">{pwMsg}</p>{/if}
+        {#if liveKeys}
+          <div class="flex flex-wrap items-center gap-3 rounded border p-3">
+            <span>You have {liveKeys} API key{liveKeys === 1 ? "" : "s"}. They keep working. Revoke all of them?</span>
+            <Button type="button" variant="destructive" size="sm" onclick={revokeAllKeys}>Revoke all API keys</Button>
+            <Button type="button" variant="outline" size="sm" onclick={() => (liveKeys = 0)}>Keep them</Button>
+          </div>
+        {/if}
         <div><Button type="submit">Change password</Button></div>
       </form>
     </Card.Content>

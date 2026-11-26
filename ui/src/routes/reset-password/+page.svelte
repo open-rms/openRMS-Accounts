@@ -24,7 +24,8 @@
   <h1>Choose a new password</h1>
   {#if done}
     <p>Password changed. You've been signed out everywhere, including linked devices; sign in again.</p>
-    <p><a href="/login">Sign in</a></p>
+    <p>API keys keep working. If you think someone else had your password, sign in and revoke them.</p>
+    <p><a href="/login?next=%2Fkeys%3Fafter%3Dreset">Sign in</a></p>
   {:else if linkError || !token}
     <p class="text-destructive">This reset link is invalid or has expired.</p>
     <p><a href="/forgot-password">Request a new one</a></p>

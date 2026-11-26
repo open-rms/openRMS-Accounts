@@ -218,16 +218,32 @@ run("API keys (spec §5)", () => {
     expect(rows[0].n).toBe(0);
   });
 
-  it("a ban revokes the account's keys", async () => {
-    const m = await api("/api/v1/me/keys", { json: { aud: RIGS, scopes: ["favorites"], name: "rigs" } });
-    expect(m.status).toBe(201);
-    // Ban straight through Better Auth's admin API as a superadmin would; simulate with the hook path's effect.
-    const { revokeAllKeys } = await import("../src/keys.js");
-    await revokeAllKeys(sub, "banned");
-    const { rows } = await q(`SELECT revoke_reason FROM api_key WHERE jti = $1`, [m.body.jti]);
-    expect(rows[0].revoke_reason).toBe("banned");
-    // Rigs' key.revoked goes to Rigs' subscriber, not to Atlas's.
-    await new Promise((r) => setTimeout(r, 6000));
-    expect(events.some((e) => e.type === "key.revoked" && (e.data as { jti: string }).jti === m.body.jti)).toBe(false);
+  it("a ban through Better Auth's admin API revokes the account's keys and fires key.revoked", async () => {
+    const atlasKey = await api("/api/v1/me/keys", { json: { aud: ATLAS, scopes: ["heartbeat"], name: "before ban" } });
+    const rigsKey = await api("/api/v1/me/keys", { json: { aud: RIGS, scopes: ["favorites"], name: "rigs" } });
+    expect(atlasKey.status).toBe(201);
+    expect(rigsKey.status).toBe(201);
+    // An admin (dev runs with STAFF_2FA_REQUIRED off) bans the account with the real endpoint.
+    const adminCall = `N4${letters()}`;
+    const su = await api("/api/auth/sign-up/email", {
+      json: { email: `${adminCall.toLowerCase()}@example.test`, password: "correct horse battery", name: "Ban Admin", callsign: adminCall },
+      headers: { cookie: "" },
+    });
+    expect(su.status).toBe(200);
+    try {
+      await q(`UPDATE "user" SET role = 'admin' WHERE id = $1`, [su.body.user.id]);
+      const adminCookie = (su.headers.getSetCookie() ?? []).map((c) => c.split(";")[0]).join("; ");
+      const ban = await api("/api/auth/admin/ban-user", { json: { userId: sub, banReason: "e2e" }, headers: { cookie: adminCookie } });
+      expect(ban.status, JSON.stringify(ban.body)).toBe(200);
+      const { rows } = await q(`SELECT jti, revoke_reason FROM api_key WHERE jti = ANY($1)`, [[atlasKey.body.jti, rigsKey.body.jti]]);
+      expect(rows.map((r) => r.revoke_reason)).toEqual(["banned", "banned"]);
+      expect(await waitFor(() => events.some((e) => e.type === "key.revoked" && (e.data as { jti: string }).jti === atlasKey.body.jti))).toBe(true);
+      // Rigs' key.revoked goes to Rigs' subscriber, not to Atlas's.
+      expect(events.some((e) => e.type === "key.revoked" && (e.data as { jti: string }).jti === rigsKey.body.jti)).toBe(false);
+      // A banned account can't make keys.
+      expect((await api("/api/v1/me/keys", { json: { aud: ATLAS, scopes: ["heartbeat"], name: "x" } })).status).not.toBe(201);
+    } finally {
+      await q(`DELETE FROM "user" WHERE id = $1`, [su.body.user.id]);
+    }
   }, 20_000);
 });

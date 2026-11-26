@@ -28,7 +28,7 @@ ACCOUNTS_E2E=1 pnpm test   # end-to-end tests against the running server
 |---|---|
 | `src/` | The service: Better Auth config (`auth.ts`), token claims, staff roles (`rbac.ts`), event outbox and webhooks, routes |
 | `ui/` | The account pages: SvelteKit static SPA, served by the service |
-| `packages/service-auth` | `@openrms/service-auth`: what other services use to trust Accounts (verify tokens offline against JWKS, verify webhooks, hash their own API keys). **MPL-2.0** |
+| `packages/service-auth` | `@openrms/service-auth`: what other services use to trust Accounts (verify access tokens and `ormk_` API keys offline against JWKS with `verifyBearer`, keep the key denylist current with `RevocationSync`, verify webhooks). **MPL-2.0** |
 | `scripts/` | One-off migrations (`import-from-directory.ts`) |
 | `db/bootstrap.sql` | Creates the service's role and database on any PostgreSQL 16+ |
 
@@ -72,12 +72,19 @@ environment: `BETTER_AUTH_URL` (the issuer), `TRUSTED_ORIGINS`, `APPS`, `FIRST_P
   they act as `user` everywhere (spec §4b). Deploy with it off, have every staff account enrol
   under Account → Sign-in security, then turn it on.
 
+API keys (spec §5): people make them at `/keys`; Watch mints a renewable Atlas key through the
+device flow. Services verify keys offline and learn revocations from the `key.revoked` webhook
+(sent only to the key's service: set each subscriber's audience with `set-webhook-audience`) and
+from `GET /api/v1/keys/revoked`. Key scopes come from each service's
+`/.well-known/oauth-protected-resource` (`openrms_key_scopes`), with the spec's lists built in
+until a service publishes them.
+
 Operator commands (`pnpm cli …`): `bootstrap CALL`, `set-role CALL ROLE`, `set-callsign OLD NEW`,
-`reset-2fa CALL` (every factor lost: removes TOTP and passkeys, ends sessions; confirm who is asking first),
+`reset-2fa CALL [--revoke-keys]` (every factor lost: removes TOTP and passkeys, ends sessions; confirm who is asking first),
 `delete-user CALL [--force]` (emits `user.deleted`; staff can also use
 `POST /api/auth/admin/remove-user`), `seed-clients`, `add-client`, `list-clients`, `rename-client OLD NEW`,
 `link-resource CLIENT URL` / `unlink-resource`,
-`add-webhook NAME URL`, `rename-webhook OLD NEW [URL]`, `list-webhooks`.
+`add-webhook NAME URL [AUDIENCE]`, `set-webhook-audience NAME [AUDIENCE]`, `rename-webhook OLD NEW [URL]`, `list-webhooks`.
 
 ## License
 
