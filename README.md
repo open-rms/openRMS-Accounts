@@ -11,7 +11,7 @@
 
 Any PostgreSQL 16+ server works: local Docker, a managed host or your own. The service needs
 only its own database and role; it never reads another service's database. Create them once
-as an admin role, then point `DATABASE_URL` at the new database (add `?sslmode=require` for a
+as an admin role, then point `DATABASE_URL` at the new database (add `?sslmode=verify-full` for a
 remote server). Migrations run at startup and with `pnpm migrate`.
 
 ```sh
