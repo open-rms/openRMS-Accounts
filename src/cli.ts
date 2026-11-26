@@ -1,5 +1,6 @@
 // pnpm cli <command>
 //   set-role CALL superadmin|admin|moderator|user
+//   reset-2fa CALL            remove TOTP and passkeys, end sessions and refresh tokens (lost every factor)
 //   set-callsign OLD NEW              moderator callsign change (services re-check via user.updated)
 //   delete-user CALL [--force]        delete an account for good (emits user.deleted)
 //   bootstrap CALL                    first deploy: make CALL superadmin, then seed-clients
@@ -14,7 +15,7 @@
 //   rename-webhook OLD NEW [URL]      rename a subscriber (same secret), optionally new URL
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { auth, withClientId } from "./auth.js";
+import { auth, revokeUserTokens, withClientId } from "./auth.js";
 import { pool, q, tx } from "./db/pool.js";
 import { env } from "./env.js";
 import { emit } from "./events.js";
@@ -22,6 +23,7 @@ import { isValidBaseCallsign, normalizeCallsign } from "./lib/callsign.js";
 import { migrate } from "./migrate.js";
 import { ROLE_NAMES, type RoleName } from "./rbac.js";
 import { audit } from "./routes/admin.js";
+import { hasSecondFactor } from "./staff.js";
 
 type Kind = "public" | "confidential" | "service" | "first-party";
 
@@ -128,6 +130,28 @@ switch (cmd) {
       await emit("user.updated", { sub: r.rows[0].id });
     }
     console.log(r.rowCount ? `${call} is now ${role}` : "no such callsign");
+    if (r.rowCount && role !== "user" && !(await hasSecondFactor(r.rows[0].id))) {
+      console.log(`note: ${call} has no second factor yet; with STAFF_2FA_REQUIRED on they act as "user" until they turn on 2FA or add a passkey`);
+    }
+    break;
+  }
+  case "reset-2fa": {
+    // Last-resort recovery (spec §4b): every factor lost. Check who is asking out of band first.
+    const call = normalizeCallsign(args[0] ?? "");
+    const { rows } = await q<{ id: string }>(`SELECT id FROM "user" WHERE callsign = $1`, [call]);
+    if (!rows[0]) {
+      console.log(call ? "no such callsign" : "usage: reset-2fa CALLSIGN");
+      break;
+    }
+    const id = rows[0].id;
+    const tf = await q(`DELETE FROM "twoFactor" WHERE "userId" = $1`, [id]);
+    const pk = await q(`DELETE FROM passkey WHERE "userId" = $1`, [id]);
+    await q(`UPDATE "user" SET "twoFactorEnabled" = false, "updatedAt" = now() WHERE id = $1`, [id]);
+    const ss = await q(`DELETE FROM session WHERE "userId" = $1`, [id]);
+    await revokeUserTokens(id);
+    await audit(null, "2fa.reset.cli", id, { totp: tf.rowCount, passkeys: pk.rowCount, sessions: ss.rowCount });
+    await emit("user.updated", { sub: id });
+    console.log(`${call}: 2FA off, ${pk.rowCount} passkey(s) removed, ${ss.rowCount} session(s) and every refresh token ended`);
     break;
   }
   case "set-callsign": {
@@ -322,7 +346,7 @@ switch (cmd) {
     break;
   }
   default:
-    console.log("usage: pnpm cli set-role CALL ROLE | set-callsign OLD NEW | delete-user CALL [--force] | bootstrap CALL | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | rename-client OLD NEW | link-resource CLIENT URL | unlink-resource CLIENT URL | add-webhook NAME URL | rename-webhook OLD NEW [URL] | list-webhooks");
+    console.log("usage: pnpm cli set-role CALL ROLE | reset-2fa CALL | set-callsign OLD NEW | delete-user CALL [--force] | bootstrap CALL | seed-clients | add-client ID NAME KIND [redirect...] | list-clients | rename-client OLD NEW | link-resource CLIENT URL | unlink-resource CLIENT URL | add-webhook NAME URL | rename-webhook OLD NEW [URL] | list-webhooks");
 }
 if (cliSessionToken) await q(`DELETE FROM session WHERE token = $1`, [cliSessionToken]);
 await pool.end();

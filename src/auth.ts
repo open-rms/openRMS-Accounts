@@ -2,7 +2,8 @@
 // Contract: openRMS-Spec/accounts/identity.md. Account rules moved here from openRMS-Atlas (then called the Directory).
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
-import { admin, bearer, jwt, openAPI, organization } from "better-auth/plugins";
+import { admin, bearer, jwt, openAPI, organization, twoFactor } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
 import { oauthDeviceAuthorization, oauthProvider } from "@better-auth/oauth-provider";
 import { buildClaims } from "./claims.js";
 import { pool } from "./db/pool.js";
@@ -11,6 +12,7 @@ import { emit } from "./events.js";
 import { isValidBaseCallsign, isValidGrid, normalizeCallsign } from "./lib/callsign.js";
 import { sendMail } from "./lib/mail.js";
 import { ac, can, canAssign, outranks, roleOf, roles, ROLE_NAMES, type RoleName } from "./rbac.js";
+import { assertCanHoldRole, effectiveRole, isStaff, STAFF_2FA_MESSAGE, staffNeedsSecondFactor } from "./staff.js";
 
 // Registered clients get well-known ids (spec §8, e.g. "openrms-watch"); see registerClient().
 let nextClientId: string | undefined;
@@ -38,7 +40,11 @@ const rankGuard = createAuthMiddleware(async (ctx) => {
   if (!ctx.path.startsWith("/admin/") || ctx.path.startsWith("/admin/oauth2/") || ctx.path === "/admin/has-permission" || ctx.path === "/admin/stop-impersonating") return;
   const session = await getSessionFromCtx(ctx).catch(() => null);
   if (!session) return; // the plugin answers 401 itself
-  const actorRole = (session.user as { role?: string }).role;
+  const storedRole = (session.user as { role?: string }).role;
+  if (isStaff(storedRole) && (await staffNeedsSecondFactor(session.user.id, storedRole))) {
+    throw new APIError("FORBIDDEN", { message: STAFF_2FA_MESSAGE });
+  }
+  const actorRole = storedRole;
   const body = (ctx.body ?? {}) as { userId?: string; role?: string | string[]; data?: { role?: string } };
   const requested = body.role ?? body.data?.role;
   if (requested !== undefined) {
@@ -47,6 +53,11 @@ const rankGuard = createAuthMiddleware(async (ctx) => {
       if (!ROLE_NAMES.includes(r as RoleName) || !canAssign(actorRole, r as RoleName)) {
         throw new APIError("FORBIDDEN", { message: `you can't assign the role "${r}"` });
       }
+    }
+    if (body.userId) {
+      const strongest = roleOf(list.join(","));
+      const refusal = await assertCanHoldRole(body.userId, strongest);
+      if (refusal) throw new APIError("FORBIDDEN", { message: refusal });
     }
   }
   if (TARGETED.has(ctx.path) && body.userId) {
@@ -74,7 +85,31 @@ function succeeded(returned: unknown): boolean {
   return true;
 }
 
+// Second factors: passkeys live in their own table, so mark the account changed (the staff role a
+// service sees can depend on them, spec §4b). TOTP on/off updates the user row, whose hook emits.
+const FACTOR_PATHS = new Set(["/passkey/verify-registration", "/passkey/delete-passkey", "/two-factor/disable"]);
+async function factorEvents(ctx: Parameters<Parameters<typeof createAuthMiddleware>[0]>[0]) {
+  if (!FACTOR_PATHS.has(ctx.path) && ctx.path !== "/two-factor/verify-totp") return;
+  if (!succeeded(ctx.context.returned)) return;
+  const session = ctx.context.session ?? (await getSessionFromCtx(ctx).catch(() => null));
+  const userId = session?.user.id;
+  if (!userId) return;
+  if (ctx.path === "/two-factor/verify-totp") {
+    // Also the sign-in step; only the first successful check after enabling turns 2FA on.
+    const { rows } = await pool.query(`SELECT 1 FROM "user" WHERE id = $1 AND "twoFactorEnabled" AND "updatedAt" > now() - interval '10 seconds'`, [userId]);
+    if (rows.length) await auditFactor(userId, "2fa.enabled");
+    return;
+  }
+  await pool.query(`UPDATE "user" SET "updatedAt" = now() WHERE id = $1`, [userId]);
+  await auditFactor(userId, ctx.path === "/two-factor/disable" ? "2fa.disabled" : ctx.path === "/passkey/delete-passkey" ? "passkey.removed" : "passkey.added");
+  if (ctx.path !== "/two-factor/disable") await emit("user.updated", { sub: userId });
+}
+async function auditFactor(userId: string, action: string) {
+  await pool.query(`INSERT INTO audit_log (actor_sub, action, target) VALUES ($1, $2, $1)`, [userId, action]);
+}
+
 const adminEvents = createAuthMiddleware(async (ctx) => {
+  await factorEvents(ctx);
   const userId = (ctx.body as { userId?: string } | undefined)?.userId;
   if (!userId || !ctx.path.startsWith("/admin/") || !succeeded(ctx.context.returned)) return;
   if (ctx.path !== "/admin/remove-user") await pool.query(`UPDATE "user" SET "updatedAt" = now() WHERE id = $1`, [userId]);
@@ -219,6 +254,20 @@ export const auth = betterAuth({
     // registered OAuth client; the token is a real access token bound to the requested resource.
     oauthDeviceAuthorization({ verificationUri: `${env.UI_URL}/link`, expiresIn: "15m", interval: "5s" }),
     bearer(),
+    // Optional for users, required for staff (spec §4b). Backup codes are the first recovery path;
+    // the last one is `pnpm cli reset-2fa CALL` on the host. No email OTP: the inbox already resets passwords.
+    twoFactor({
+      issuer: "openRMS",
+      backupCodeOptions: { amount: 10, length: 10 },
+      trustDeviceMaxAge: 30 * 24 * 3600,
+      accountLockout: { enabled: true, maxFailedAttempts: 10, durationSeconds: 15 * 60 },
+    }),
+    // Passkeys belong to the issuer's host (auth.openrms.dev); a self-hosted issuer has its own.
+    passkey({
+      rpID: new URL(env.ISSUER).hostname,
+      rpName: "openRMS",
+      origin: [...new Set([env.ISSUER, env.UI_URL])],
+    }),
     admin({ ac, roles, defaultRole: "user", adminRoles: ["superadmin", "admin", "moderator"] }),
     // Clubs: one organization per extra callsign (club, special-event, or a second personal call).
     organization({

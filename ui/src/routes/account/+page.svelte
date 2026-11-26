@@ -8,6 +8,7 @@
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import * as Card from "#lib/components/ui/card/index.ts";
   import * as Table from "#lib/components/ui/table/index.ts";
+  import SecurityCard from "#lib/SecurityCard.svelte";
 
   $effect(() => {
     if (!$session.isPending && !$session.data?.user) goto("/login?next=/account");
@@ -120,6 +121,8 @@
       </form>
     </Card.Content>
   </Card.Root>
+
+  <SecurityCard />
 
   <Card.Root class="mb-5">
     <Card.Header>

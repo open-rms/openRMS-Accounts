@@ -7,7 +7,7 @@ import { clubsOf, loadUser, strongestClubRole } from "../claims.js";
 import { q } from "../db/pool.js";
 import { env } from "../env.js";
 import { normalizeCallsign } from "../lib/callsign.js";
-import { roleOf } from "../rbac.js";
+import { effectiveRole } from "../staff.js";
 
 type Vars = { Variables: { clientId: string } };
 export const serviceRoutes = new Hono<Vars>();
@@ -48,7 +48,7 @@ const publicUser = async (id: string) => {
   if (!u) return null;
   return {
     sub: u.id, name: u.name, callsign: u.callsign, callsign_verified: !!u.callsignVerified, callsign_verified_method: u.callsignVerifiedMethod,
-    grid: u.gridsquare, role: roleOf(u.role), banned: !!u.banned, clubs: await clubsOf(u.id),
+    grid: u.gridsquare, role: await effectiveRole(u.id, u.role), banned: !!u.banned, clubs: await clubsOf(u.id),
   };
 };
 

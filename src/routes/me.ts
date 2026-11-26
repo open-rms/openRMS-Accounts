@@ -8,6 +8,7 @@ import { q } from "../db/pool.js";
 import { emit } from "../events.js";
 import { normalizeCallsign } from "../lib/callsign.js";
 import { permissionsOf, roleOf } from "../rbac.js";
+import { effectiveRole, staffNeedsSecondFactor } from "../staff.js";
 import { requireSession, type SessionVars } from "./session.js";
 
 export const meRoutes = new Hono<SessionVars>();
@@ -17,13 +18,20 @@ type U = { id: string; name: string; email: string; callsign: string; callsignVe
 meRoutes.get("/", async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) return c.json({ user: null });
-  const u = session.user as typeof session.user & U;
+  const u = session.user as typeof session.user & U & { twoFactorEnabled?: boolean | null };
+  const role = await effectiveRole(u.id, u.role);
+  const { rows: pk } = await q<{ n: number }>(`SELECT count(*)::int AS n FROM passkey WHERE "userId" = $1`, [u.id]);
   return c.json({
     user: {
       id: u.id, name: u.name, email: u.email, emailVerified: u.emailVerified, callsign: u.callsign, callsignVerified: !!u.callsignVerified,
-      callsignVerifiedMethod: u.callsignVerifiedMethod ?? null, gridsquare: u.gridsquare ?? null, role: roleOf(u.role),
+      callsignVerifiedMethod: u.callsignVerifiedMethod ?? null, gridsquare: u.gridsquare ?? null, role,
+      twoFactorEnabled: !!u.twoFactorEnabled, passkeys: pk[0]?.n ?? 0,
     },
-    permissions: permissionsOf(u.role),
+    permissions: permissionsOf(role),
+    /** Holds a staff role it can't use until a second factor is set up (spec §4b). */
+    staffNeedsSecondFactor: await staffNeedsSecondFactor(u.id, u.role),
+    /** The role held, whether or not it can be used yet. */
+    storedRole: roleOf(u.role),
     clubs: await clubsOf(u.id),
   });
 });

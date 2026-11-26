@@ -31,6 +31,11 @@ const schema = z.object({
   /** Proxy IPs or CIDRs to skip when a header holds a forwarded chain (Better Auth trustedProxies). */
   TRUSTED_PROXIES: z.string().default(""),
   REQUIRE_EMAIL_VERIFICATION: z.stringbool().default(false),
+  /**
+   * Staff (moderator and up) must have TOTP or a passkey; without one they act as "user"
+   * (spec §4b). Off by default so a deploy can ship 2FA, let staff enrol, then turn it on.
+   */
+  STAFF_2FA_REQUIRED: z.stringbool().default(false),
   SMTP_URL: z.string().optional(),
   MAIL_FROM: z.string().default("openRMS Accounts <noreply@localhost>"),
 });

@@ -5,6 +5,7 @@ import { createMiddleware } from "hono/factory";
 import { auth } from "../auth.js";
 import { q } from "../db/pool.js";
 import { emit } from "../events.js";
+import { assertCanHoldRole, effectiveRole, STAFF_2FA_MESSAGE } from "../staff.js";
 import { can, canAssign, outranks, permissionsOf, roleOf, ROLE_NAMES, type RoleName } from "../rbac.js";
 
 type Vars = { Variables: { role: string; userId: string } };
@@ -13,8 +14,10 @@ export const adminRoutes = new Hono<Vars>();
 adminRoutes.use("*", async (c, next) => {
   const s = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!s) return c.json({ error: "sign in required" }, 401);
-  const role = (s.user as { role?: string }).role ?? "user";
-  if (roleOf(role) === "user") return c.json({ error: "staff only" }, 403);
+  const stored = (s.user as { role?: string }).role ?? "user";
+  if (roleOf(stored) === "user") return c.json({ error: "staff only" }, 403);
+  const role = await effectiveRole(s.user.id, stored);
+  if (role === "user") return c.json({ error: STAFF_2FA_MESSAGE }, 403);
   c.set("role", role);
   c.set("userId", s.user.id);
   await next();
@@ -45,6 +48,8 @@ adminRoutes.post("/users/:id/role", async (c) => {
   if (!rows[0]) return c.json({ error: "not found" }, 404);
   if (!outranks(c.get("role"), rows[0].role)) return c.json({ error: `you can't change a ${roleOf(rows[0].role)}'s role` }, 403);
   if (!canAssign(c.get("role"), role)) return c.json({ error: `you can't assign ${role}` }, 403);
+  const refusal = await assertCanHoldRole(target, role);
+  if (refusal) return c.json({ error: refusal }, 403);
   await q(`UPDATE "user" SET role = $2, "updatedAt" = now() WHERE id = $1`, [target, role]);
   await audit(c.get("userId"), "role.set", target, { from: roleOf(rows[0].role), to: role });
   await emit("user.updated", { sub: target });

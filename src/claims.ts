@@ -1,6 +1,6 @@
 // The claims Accounts puts in tokens (openRMS-Spec/accounts/identity.md §4).
 import { q } from "./db/pool.js";
-import { roleOf } from "./rbac.js";
+import { effectiveRole } from "./staff.js";
 
 export interface UserRow {
   id: string;
@@ -49,7 +49,7 @@ export async function buildClaims(user: Pick<UserRow, "id"> & Partial<UserRow>, 
     Object.assign(out, { callsign: u.callsign, callsign_verified: !!u.callsignVerified, callsign_verified_method: u.callsignVerifiedMethod ?? null });
   }
   if (has("clubs")) out.clubs = await clubsOf(u.id);
-  if (firstParty) out.role = roleOf(u.role);
+  if (firstParty) out.role = await effectiveRole(u.id, u.role);
   return out;
 }
 

@@ -68,8 +68,12 @@ environment: `BETTER_AUTH_URL` (the issuer), `TRUSTED_ORIGINS`, `APPS`, `FIRST_P
   header carries a forwarded chain.
 - `SMTP_URL` and `MAIL_FROM`: password-reset and verification mail. Unset, mail is logged.
   Cloudflare Email Sending: `smtps://api_token:<token>@smtp.mx.cloudflare.net:465`.
+- `STAFF_2FA_REQUIRED` (default `false`): staff (moderator and up) need TOTP or a passkey, or
+  they act as `user` everywhere (spec §4b). Deploy with it off, have every staff account enrol
+  under Account → Sign-in security, then turn it on.
 
 Operator commands (`pnpm cli …`): `bootstrap CALL`, `set-role CALL ROLE`, `set-callsign OLD NEW`,
+`reset-2fa CALL` (every factor lost: removes TOTP and passkeys, ends sessions; confirm who is asking first),
 `delete-user CALL [--force]` (emits `user.deleted`; staff can also use
 `POST /api/auth/admin/remove-user`), `seed-clients`, `add-client`, `list-clients`, `rename-client OLD NEW`,
 `link-resource CLIENT URL` / `unlink-resource`,

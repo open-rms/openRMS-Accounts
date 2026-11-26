@@ -3,6 +3,12 @@ export interface Club {
   id: string; name: string; callsign: string; verified: boolean; myRole: "owner" | "admin" | "member";
   members: { userId: string; callsign: string; name: string; role: "owner" | "admin" | "member" }[];
 }
+export interface Me {
+  user: { id: string; name: string; email: string; callsign: string; role: string; twoFactorEnabled: boolean; passkeys: number } | null;
+  permissions?: Record<string, string[]>;
+  staffNeedsSecondFactor?: boolean;
+  storedRole?: string;
+}
 export interface UiConfig { issuer: string; apps: { origin: string; name: string }[] }
 
 async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -17,6 +23,7 @@ async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   config: () => send<UiConfig>("/api/v1/ui/config"),
+  me: () => send<Me>("/api/v1/me"),
   clubs: () => send<{ clubs: Club[] }>("/api/v1/me/clubs"),
   createClub: (callsign: string, name: string) => send<{ id: string }>("/api/v1/me/clubs", { method: "POST", body: JSON.stringify({ callsign, name }) }),
   addClubMember: (id: string, callsign: string, role: string) =>
