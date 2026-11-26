@@ -1,7 +1,7 @@
 // @openrms/service-auth: what an openRMS service needs to trust openRMS-Accounts.
 // Contract: openRMS-Spec/accounts/identity.md (§3 tokens, §4 claims, §5 API keys, §7 webhooks).
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
+import { createLocalJWKSet, decodeProtectedHeader, jwtVerify, type JSONWebKeySet, type JWTPayload, type JWTVerifyGetKey } from "jose";
 
 export type ClubRole = "owner" | "admin" | "member";
 export type StaffRole = "user" | "moderator" | "admin" | "superadmin";
@@ -42,6 +42,15 @@ export interface VerifyOptions {
   issuers?: string[];
   /** Allowed clock skew in seconds (default 30). */
   clockTolerance?: number;
+  /**
+   * File that keeps the last good JWKS, so a restart while Accounts is unreachable still
+   * verifies. Default: OPENRMS_JWKS_CACHE_FILE, else memory only.
+   */
+  jwksCacheFile?: string;
+  /** Refresh keys older than this (ms, default 10 minutes). */
+  jwksMaxAgeMs?: number;
+  /** Least time between fetches, also for an unknown `kid` (ms, default 30 s). */
+  jwksCooldownMs?: number;
 }
 
 export class TokenError extends Error {
@@ -50,9 +59,6 @@ export class TokenError extends Error {
     this.name = "TokenError";
   }
 }
-
-const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
-const jwksUriCache = new Map<string, Promise<string>>();
 
 function trim(u: string) {
   return u.replace(/\/+$/, "");
@@ -63,33 +69,124 @@ export function defaultIssuers(): string[] {
   return (env ?? "").split(",").map((s) => trim(s.trim())).filter(Boolean);
 }
 
-/** The issuer's jwks_uri, from OIDC discovery (cached per process). */
-async function jwksUri(issuer: string): Promise<string> {
-  let p = jwksUriCache.get(issuer);
-  if (!p) {
-    p = fetch(`${issuer}/.well-known/openid-configuration`)
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`discovery ${r.status}`);
-        const d = (await r.json()) as { jwks_uri?: string };
-        if (!d.jwks_uri) throw new Error("discovery has no jwks_uri");
-        return d.jwks_uri;
-      })
-      .catch((e) => {
-        jwksUriCache.delete(issuer); // retry next time
-        throw e;
-      });
-    jwksUriCache.set(issuer, p);
-  }
-  return p;
+// ---------------------------------------------------------------- signing keys (JWKS)
+//
+// Keys are fetched from the issuer's jwks_uri (found by OIDC discovery) and refreshed every
+// 10 minutes, or at once (at most every 30 s) when a token names a key we don't have. When a
+// refresh fails, the last good set keeps working: an unreachable Accounts must not stop
+// verification (spec §5.5). With a cache file (VerifyOptions.jwksCacheFile or
+// OPENRMS_JWKS_CACHE_FILE) the last good set also survives a restart.
+
+interface CachedJwks { jwksUri: string; jwks: JSONWebKeySet; fetchedAt: number }
+const jwksCache = new Map<string, { entry: CachedJwks; getKey: ReturnType<typeof createLocalJWKSet> }>();
+const lastAttempt = new Map<string, number>();
+const MAX_AGE_MS = 10 * 60_000;
+const COOLDOWN_MS = 30_000;
+
+/** Forget keys held in memory (a test, or to force a refetch). The cache file is kept. */
+export function clearJwksMemory() {
+  jwksCache.clear();
+  lastAttempt.clear();
 }
 
-async function keySet(issuer: string) {
-  let ks = jwksCache.get(issuer);
-  if (!ks) {
-    ks = createRemoteJWKSet(new URL(await jwksUri(issuer)), { cooldownDuration: 30_000, cacheMaxAge: 10 * 60_000 });
-    jwksCache.set(issuer, ks);
+function cacheFile(opts: KeySetOptions): string | undefined {
+  return opts.jwksCacheFile ?? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.OPENRMS_JWKS_CACHE_FILE;
+}
+
+async function readFileCache(file: string, issuer: string): Promise<CachedJwks | undefined> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const all = JSON.parse(await readFile(file, "utf8")) as Record<string, CachedJwks>;
+    const e = all[issuer];
+    return e?.jwks?.keys?.length ? e : undefined;
+  } catch {
+    return undefined;
   }
-  return ks;
+}
+
+async function writeFileCache(file: string, issuer: string, entry: CachedJwks) {
+  try {
+    const { readFile, writeFile, rename } = await import("node:fs/promises");
+    let all: Record<string, CachedJwks> = {};
+    try { all = JSON.parse(await readFile(file, "utf8")); } catch { /* new file */ }
+    all[issuer] = entry;
+    const tmp = `${file}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(all), { mode: 0o644 });
+    await rename(tmp, file);
+  } catch (e) {
+    console.error(`[openrms auth] couldn't write JWKS cache ${file}:`, (e as Error).message);
+  }
+}
+
+async function fetchJwks(issuer: string): Promise<CachedJwks> {
+  const timeout = AbortSignal.timeout(5000);
+  const d = await fetch(`${issuer}/.well-known/openid-configuration`, { signal: timeout });
+  if (!d.ok) throw new Error(`discovery ${d.status}`);
+  const { jwks_uri } = (await d.json()) as { jwks_uri?: string };
+  if (!jwks_uri) throw new Error("discovery has no jwks_uri");
+  const k = await fetch(jwks_uri, { signal: AbortSignal.timeout(5000) });
+  if (!k.ok) throw new Error(`jwks ${k.status}`);
+  const jwks = (await k.json()) as JSONWebKeySet;
+  if (!Array.isArray(jwks.keys) || !jwks.keys.length) throw new Error("jwks has no keys");
+  return { jwksUri: jwks_uri, jwks, fetchedAt: Date.now() };
+}
+
+function remember(issuer: string, entry: CachedJwks) {
+  const v = { entry, getKey: createLocalJWKSet(entry.jwks) };
+  jwksCache.set(issuer, v);
+  return v;
+}
+
+/** Refresh now; on failure keep (and return) what we had. Throws only with nothing to fall back on. */
+async function refresh(issuer: string, opts: KeySetOptions) {
+  lastAttempt.set(issuer, Date.now());
+  try {
+    const entry = await fetchJwks(issuer);
+    const file = cacheFile(opts);
+    if (file) await writeFileCache(file, issuer, entry);
+    return remember(issuer, entry);
+  } catch (e) {
+    const held = jwksCache.get(issuer);
+    if (held) {
+      console.error(`[openrms auth] JWKS refresh from ${issuer} failed (${(e as Error).message}); using keys fetched ${new Date(held.entry.fetchedAt).toISOString()}`);
+      return held;
+    }
+    throw e;
+  }
+}
+
+async function current(issuer: string, opts: KeySetOptions) {
+  let held = jwksCache.get(issuer);
+  if (!held) {
+    const file = cacheFile(opts);
+    const fromFile = file ? await readFileCache(file, issuer) : undefined;
+    if (fromFile) held = remember(issuer, fromFile);
+  }
+  const maxAge = opts.jwksMaxAgeMs ?? MAX_AGE_MS;
+  const stale = !held || Date.now() - held.entry.fetchedAt > maxAge;
+  const cooling = Date.now() - (lastAttempt.get(issuer) ?? 0) < (opts.jwksCooldownMs ?? COOLDOWN_MS);
+  if (!held || (stale && !cooling)) held = await refresh(issuer, opts);
+  return held;
+}
+
+/** A jose key resolver that serves cached keys and refetches once for an unknown `kid`. */
+function keySet(issuer: string, opts: KeySetOptions): JWTVerifyGetKey {
+  return async (header, token) => {
+    const held = await current(issuer, opts);
+    try {
+      return await held.getKey(header, token);
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code !== "ERR_JWKS_NO_MATCHING_KEY" || Date.now() - (lastAttempt.get(issuer) ?? 0) < (opts.jwksCooldownMs ?? COOLDOWN_MS)) throw e;
+      return (await refresh(issuer, opts)).getKey(header, token);
+    }
+  };
+}
+
+interface KeySetOptions {
+  jwksCacheFile?: string;
+  jwksMaxAgeMs?: number;
+  jwksCooldownMs?: number;
 }
 
 /** Prefix and JWT `typ` of an Accounts API key (spec §5.1). */
@@ -138,7 +235,7 @@ async function verifyJwt(token: string, opts: VerifyOptions & { typ?: string }):
   if (!iss) throw new TokenError("not a JWT", "invalid");
   if (!issuers.includes(iss)) throw new TokenError(`issuer ${iss} is not trusted`, "untrusted_issuer");
   try {
-    const { payload } = await jwtVerify(token, await keySet(iss), {
+    const { payload } = await jwtVerify(token, keySet(iss, opts), {
       issuer: [iss, `${iss}/`],
       audience: opts.audience,
       clockTolerance: opts.clockTolerance ?? 30,
@@ -221,8 +318,18 @@ export interface RevocationSyncOptions {
    * twice, from the webhook and the pull). Also the place to drop rows bound to those keys.
    */
   store: (keys: RevokedKey[]) => Promise<void>;
-  /** The newest `revoked_at` you have stored (ISO), or null when empty. Pulls overlap it by 5 minutes. */
-  lastSync: () => Promise<string | null>;
+  /**
+   * Where the pull cursor lives across restarts (optional). The helper advances it itself, only
+   * from rows the PULL returned, so a webhook row can never move it past a revocation the pull
+   * hasn't seen. Without it the cursor is kept in memory and each start pulls every unexpired
+   * revocation for your audience (a bounded list), which is also correct.
+   */
+  cursor?: { load: () => Promise<string | null>; save: (iso: string) => Promise<void> };
+  /**
+   * @deprecated Use `cursor`. If given (and `cursor` isn't), read once at start as the initial
+   * cursor. It must be max(revoked_at) over PULLED rows only, never over webhook rows.
+   */
+  lastSync?: () => Promise<string | null>;
   /** Pull interval in ms (default 5 minutes). */
   intervalMs?: number;
   /** Where failures go (default console.error). Sync failures never stop keys working (fail open). */
@@ -238,6 +345,7 @@ export class RevocationSync {
   private token: { value: string; until: number } | undefined;
   private readonly issuer: string;
   private readonly log: (message: string, error?: unknown) => void;
+  private cursorAt: string | null | undefined; // undefined: not loaded yet
 
   constructor(private readonly opts: RevocationSyncOptions) {
     const issuer = opts.issuer ?? defaultIssuers()[0];
@@ -262,7 +370,10 @@ export class RevocationSync {
 
   /** Fetch revocations since the last stored one; returns how many were handed to `store`. */
   async pull(): Promise<number> {
-    const last = await this.opts.lastSync();
+    if (this.cursorAt === undefined) {
+      this.cursorAt = (await (this.opts.cursor?.load() ?? this.opts.lastSync?.())) ?? null;
+    }
+    const last = this.cursorAt;
     const since = last ? new Date(new Date(last).getTime() - 5 * 60_000).toISOString() : "1970-01-01T00:00:00.000Z";
     const res = await fetch(`${this.issuer}/api/v1/keys/revoked?since=${encodeURIComponent(since)}`, {
       headers: { authorization: `Bearer ${await this.accessToken()}` },
@@ -270,11 +381,19 @@ export class RevocationSync {
     if (res.status === 401) this.token = undefined;
     if (!res.ok) throw new Error(`GET /api/v1/keys/revoked: HTTP ${res.status}`);
     const body = (await res.json()) as { revoked: RevokedKey[] };
-    if (body.revoked.length) await this.opts.store(body.revoked);
+    if (body.revoked.length) {
+      await this.opts.store(body.revoked);
+      // Advance only after the rows are stored, and only from pulled rows.
+      const newest = body.revoked.reduce((m, k) => (k.revoked_at > m ? k.revoked_at : m), last ?? "");
+      if (newest && newest !== last) {
+        this.cursorAt = newest;
+        await this.opts.cursor?.save(newest);
+      }
+    }
     return body.revoked.length;
   }
 
-  /** Handle a verified webhook event. Returns true for `key.revoked` (stored), false for others. */
+  /** Handle a verified webhook event. Returns true for `key.revoked` (stored), false for others. Never moves the pull cursor. */
   async ingest(event: AccountsEvent): Promise<boolean> {
     if (event.type !== "key.revoked") return false;
     const d = event.data as { jti?: string; sub?: string; exp?: number };
